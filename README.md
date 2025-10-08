@@ -27,6 +27,10 @@ En snabb MVP för att granska tillgänglighet på en webbplats. Frontend + API i
    pnpm dev       # Next.js UI/API
    pnpm worker    # BullMQ + Playwright worker
    ```
+5. Kör enhetstester:
+   ```bash
+   pnpm test
+   ```
 
 Öppna sedan [http://localhost:3000](http://localhost:3000) och starta en granskning.
 
@@ -38,6 +42,9 @@ Kopiera `.env.example` till `.env.local` och fyll i:
 - `S3_*` – MinIO/S3 inställningar (bucket skapas av `docker-compose`).
 - `OPENAI_API_KEY` – Nyckel till OpenAI (gpt-4o-mini).
 - `WORKER_CONCURRENCY` – Antal parallella Playwright-jobb.
+- `ALLOW_OFFDOMAIN_SITEMAPS` – `true` tillåter sitemaps på andra domäner.
+- `RESPECT_ROBOTS` – `false` ignorerar `User-agent: *`-regler i robots.txt.
+- `MAX_URLS` – Högsta antal sidor discovery returnerar (standard 10 000).
 
 ## Kodstruktur
 ```

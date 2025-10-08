@@ -1,7 +1,10 @@
 "use client";
 
-import { FormEvent, useState, useTransition } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+
+import type { HistoryRow, SortDescriptor, SortKey } from "@/components/history/history-table";
+import { HistoryTable } from "@/components/history/history-table";
 
 export default function HomePage() {
   return (
@@ -19,6 +22,7 @@ export default function HomePage() {
           presenterar dem i ett interaktivt dashboard.
         </p>
       </header>
+      <HistorySection />
       <section className="max-w-xl rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900/60">
         <AuditLauncher />
       </section>
@@ -38,6 +42,132 @@ export default function HomePage() {
         ))}
       </section>
     </main>
+  );
+}
+
+const PAGE_SIZE = 20;
+
+type HistoryResponse = {
+  items: HistoryRow[];
+  hasMore: boolean;
+};
+
+function HistorySection() {
+  const [rows, setRows] = useState<HistoryRow[]>([]);
+  const [sort, setSort] = useState<SortDescriptor>({ column: "date", direction: "desc" });
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const pageRef = useRef(0);
+
+  const loadPage = useCallback(
+    async (pageIndex: number, replace = false) => {
+      if (replace) {
+        setInitialLoading(true);
+      } else {
+        setIsLoadingMore(true);
+      }
+      setError(null);
+
+      const offset = pageIndex * PAGE_SIZE;
+
+      try {
+        const response = await fetch(`/api/audits?offset=${offset}&limit=${PAGE_SIZE}`, {
+          method: "GET",
+          headers: { "Content-Type": "application/json" },
+          cache: "no-store"
+        });
+
+        if (!response.ok) {
+          throw new Error("Could not load audit history.");
+        }
+
+        const payload = (await response.json()) as HistoryResponse;
+        setHasMore(payload.hasMore);
+
+        setRows((previous) => {
+          const next = new Map<string, HistoryRow>();
+          if (!replace) {
+            for (const item of previous) {
+              next.set(item.id, item);
+            }
+          }
+          for (const item of payload.items) {
+            next.set(item.id, item);
+          }
+
+          return Array.from(next.values());
+        });
+
+        pageRef.current = pageIndex;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Could not load audit history.");
+      } finally {
+        if (replace) {
+          setInitialLoading(false);
+        } else {
+          setIsLoadingMore(false);
+        }
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    void loadPage(0, true);
+  }, [loadPage]);
+
+  const handleSort = useCallback((column: SortKey) => {
+    setSort((current) => {
+      if (current.column === column) {
+        return {
+          column,
+          direction: current.direction === "asc" ? "desc" : "asc"
+        };
+      }
+
+      return {
+        column,
+        direction: column === "date" ? "desc" : "asc"
+      };
+    });
+  }, []);
+
+  const handleShowMore = useCallback(() => {
+    void loadPage(pageRef.current + 1);
+  }, [loadPage]);
+
+  return (
+    <section className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-semibold text-slate-900 dark:text-slate-100">History</h2>
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          Recently completed audits appear here. Sort any column or load older runs.
+        </p>
+      </div>
+      {error ? (
+        <p role="alert" className="rounded-md border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700 dark:border-rose-900 dark:bg-rose-950/50 dark:text-rose-300">
+          {error}
+        </p>
+      ) : null}
+      {initialLoading ? (
+        <p className="text-sm text-slate-600 dark:text-slate-400">Loading history…</p>
+      ) : rows.length === 0 && !error ? (
+        <p className="rounded-md border border-dashed border-slate-300 px-4 py-6 text-center text-sm text-slate-600 dark:border-slate-700 dark:text-slate-400">
+          No audits yet—run your first one above.
+        </p>
+      ) : (
+        <HistoryTable
+          rows={rows}
+          sort={sort}
+          onSort={handleSort}
+          hasMore={hasMore}
+          onShowMore={handleShowMore}
+          isLoadingMore={isLoadingMore}
+        />
+      )}
+    </section>
   );
 }
 
