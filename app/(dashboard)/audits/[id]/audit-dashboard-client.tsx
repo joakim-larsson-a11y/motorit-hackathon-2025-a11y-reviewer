@@ -1,5 +1,6 @@
 'use client';
 
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
@@ -9,18 +10,6 @@ import { normalizeAudit } from "@/lib/serializers/audit";
 
 type Props = {
   initialAudit: SerializableAuditRun;
-};
-
-type PageInsight = {
-  severity?: string;
-  summary?: string;
-  recommendations?: string[];
-  top_rules?: Array<{
-    rule_id: string;
-    description?: string | null;
-    wcag_refs?: string[];
-    count?: number | null;
-  }>;
 };
 
 const FINAL_STATUSES = new Set(["COMPLETE", "FAILED"]);
@@ -120,7 +109,7 @@ export function AuditDashboardClient({ initialAudit }: Props) {
 
       <SummarySection summary={audit.summary} />
 
-      <PageTable pages={audit.pages} />
+      <PageTable pages={audit.pages} runId={audit.id} />
     </div>
   );
 }
@@ -165,7 +154,7 @@ function SummarySection({ summary }: { summary: SerializableAuditRun["summary"] 
   );
 }
 
-function PageTable({ pages }: { pages: SerializableAuditPage[] }) {
+function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: string }) {
   return (
     <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
       <div className="flex items-center justify-between gap-4">
@@ -178,25 +167,28 @@ function PageTable({ pages }: { pages: SerializableAuditPage[] }) {
         <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <th className="py-3">URL</th>
-              <th className="py-3">Status</th>
-              <th className="py-3">Issues</th>
-              <th className="py-3">AI-insikt</th>
-              <th className="py-3">Artefakter</th>
+              <th scope="col" className="py-3 pr-4">URL</th>
+              <th scope="col" className="py-3 pr-4">Status</th>
+              <th scope="col" className="py-3 pr-4"># Issues</th>
+              <th scope="col" className="py-3 pr-4">Screenshot</th>
+              <th scope="col" className="py-3 pr-4">Uppdaterad</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
             {pages.map((page) => (
               <tr key={page.id} className="align-top text-slate-700 dark:text-slate-300">
                 <td className="py-3 pr-4">
-                  <div className="flex flex-col">
-                    <span className="font-medium text-slate-900 dark:text-slate-100">{page.url}</span>
-                    {page.httpStatus ? (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">HTTP {page.httpStatus}</span>
-                    ) : null}
-                    {typeof page.loadTimeMs === "number" ? (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">{page.loadTimeMs} ms</span>
-                    ) : null}
+                  <div className="flex flex-col gap-1">
+                    <Link
+                      href={`/audits/${runId}/pages/${page.id}`}
+                      className="font-medium text-slate-900 underline decoration-dotted underline-offset-4 transition hover:text-brand dark:text-slate-100"
+                    >
+                      {page.url}
+                    </Link>
+                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      {page.httpStatus ? <span>HTTP {page.httpStatus}</span> : null}
+                      {typeof page.loadTimeMs === "number" ? <span>{page.loadTimeMs} ms</span> : null}
+                    </div>
                   </div>
                 </td>
                 <td className="py-3 pr-4">
@@ -204,15 +196,19 @@ function PageTable({ pages }: { pages: SerializableAuditPage[] }) {
                 </td>
                 <td className="py-3 pr-4">{page.issueCount}</td>
                 <td className="py-3 pr-4">
-                  <PageInsightCard insight={page.aiInsights as PageInsight | null} />
+                  {page.screenshotUrl ? (
+                    <img
+                      src={page.screenshotUrl}
+                      alt={buildScreenshotAlt(page.url)}
+                      loading="lazy"
+                      className="h-20 w-32 rounded-md object-cover shadow-sm"
+                    />
+                  ) : (
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Ingen skärmbild</span>
+                  )}
                 </td>
-                <td className="py-3 pr-4">
-                  <ArtifactLinks
-                    htmlUrl={page.htmlUrl}
-                    cssUrl={page.cssBundleUrl}
-                    screenshotUrl={page.screenshotUrl}
-                    axeUrl={page.axeReportUrl}
-                  />
+                <td className="py-3 pr-4 text-xs text-slate-500 dark:text-slate-400">
+                  {formatTimestamp(page.updatedAt)}
                 </td>
               </tr>
             ))}
@@ -223,86 +219,6 @@ function PageTable({ pages }: { pages: SerializableAuditPage[] }) {
   );
 }
 
-function PageInsightCard({ insight }: { insight: PageInsight | null }) {
-  if (!insight) {
-    return <span className="text-xs text-slate-500 dark:text-slate-400">Väntar på analys…</span>;
-  }
-
-  const severity = insight.severity ?? "okänd";
-  const recommendations = Array.isArray(insight.recommendations) ? insight.recommendations : [];
-  const topRules = Array.isArray(insight.top_rules) ? insight.top_rules : [];
-
-  return (
-    <div className="space-y-2 rounded-lg bg-slate-100 p-3 text-xs text-slate-700 dark:bg-slate-900/60 dark:text-slate-300">
-      <div className="font-semibold capitalize text-slate-900 dark:text-slate-100">{severity}</div>
-      {insight.summary ? <p className="text-slate-600 dark:text-slate-400">{insight.summary}</p> : null}
-      {topRules.length ? (
-        <div>
-          <p className="font-medium text-slate-900 dark:text-slate-100">Regler</p>
-          <ul className="mt-1 space-y-1">
-            {topRules.slice(0, 3).map((rule) => (
-              <li key={rule.rule_id} className="text-slate-600 dark:text-slate-400">
-                <span className="font-medium text-slate-800 dark:text-slate-200">{rule.rule_id}</span>
-                {rule.description ? ` – ${rule.description}` : null}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-      {recommendations.length ? (
-        <div>
-          <p className="font-medium text-slate-900 dark:text-slate-100">Åtgärder</p>
-          <ul className="mt-1 list-inside list-disc space-y-1 text-slate-600 dark:text-slate-400">
-            {recommendations.slice(0, 3).map((recommendation, index) => (
-              <li key={`${recommendation}-${index}`}>{recommendation}</li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function ArtifactLinks({
-  htmlUrl,
-  cssUrl,
-  screenshotUrl,
-  axeUrl,
-}: {
-  htmlUrl: string | null;
-  cssUrl: string | null;
-  screenshotUrl: string | null;
-  axeUrl: string | null;
-}) {
-  const links = [
-    { label: "HTML", url: htmlUrl },
-    { label: "CSS", url: cssUrl },
-    { label: "Screenshot", url: screenshotUrl },
-    { label: "Axe report", url: axeUrl },
-  ].filter((item) => Boolean(item.url));
-
-  if (links.length === 0) {
-    return <span className="text-xs text-slate-500 dark:text-slate-400">Klar när sidan har bearbetats.</span>;
-  }
-
-  return (
-    <ul className="flex flex-wrap items-center gap-3 text-xs text-brand">
-      {links.map((link) => (
-        <li key={link.label}>
-          <a
-            className="underline decoration-dotted underline-offset-4 transition hover:text-brand/80"
-            href={link.url ?? "#"}
-            target="_blank"
-            rel="noreferrer"
-          >
-            {link.label}
-          </a>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
 function SummaryTile({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900/60">
@@ -310,4 +226,27 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
       <dd className="mt-2 text-lg font-semibold text-slate-900 dark:text-slate-100">{value}</dd>
     </div>
   );
+}
+
+function buildScreenshotAlt(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return `Skärmbild av ${parsed.hostname}${parsed.pathname}`;
+  } catch {
+    return "Skärmbild av sidan";
+  }
+}
+
+function formatTimestamp(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleString("sv-SE", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }

@@ -20,6 +20,7 @@ type SourcePage = {
   loadTimeMs?: number | null;
   httpStatus?: number | null;
   aiInsights?: JsonValue | null;
+  updatedAt?: MaybeDate;
   issues?: SourceIssue[];
 };
 
@@ -49,7 +50,7 @@ export type SerializableAuditPage = {
   loadTimeMs: number | null;
   httpStatus: number | null;
   issueCount: number;
-  aiInsights: JsonValue | null;
+  updatedAt: string;
 };
 
 export type SerializableAuditRun = {
@@ -72,10 +73,10 @@ const toIsoString = (value: MaybeDate): string => {
 };
 
 const toIssueCount = (issues?: SourceIssue[]): number => {
-  if (!Array.isArray(issues)) {
+  if (!Array.isArray(issues) || issues.length === 0) {
     return 0;
   }
-  return issues.length;
+  return new Set(issues.map((issue) => issue.ruleId)).size;
 };
 
 const normalizePage = (page: SourcePage): SerializableAuditPage => ({
@@ -89,7 +90,7 @@ const normalizePage = (page: SourcePage): SerializableAuditPage => ({
   loadTimeMs: typeof page.loadTimeMs === "number" ? page.loadTimeMs : null,
   httpStatus: typeof page.httpStatus === "number" ? page.httpStatus : null,
   issueCount: toIssueCount(page.issues),
-  aiInsights: page.aiInsights ?? null,
+  updatedAt: toIsoString(page.updatedAt ?? new Date()),
 });
 
 const normalizeSummary = (summary?: SourceSummary | null) => {
