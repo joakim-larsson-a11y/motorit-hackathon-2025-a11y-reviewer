@@ -11,6 +11,25 @@ type AnalyzeJobData = {
   runId: string;
 };
 
+const PAGE_INSIGHT_SCHEMA = z.object({
+  summary: z.string(),
+  severity: z.enum(["critical", "serious", "moderate", "minor"]),
+  recommendations: z.array(z.string()).default([]),
+  top_rules: z
+    .array(
+      z.object({
+        rule_id: z.string(),
+        description: z.string().nullable().optional(),
+        wcag_refs: z.array(z.string()).default([]),
+        count: z.number().int().nonnegative().nullable().optional()
+      })
+    )
+    .default([]),
+  quick_wins: z.array(z.string()).default([])
+});
+
+type PageInsight = z.infer<typeof PAGE_INSIGHT_SCHEMA>;
+
 const AccessibilityAuditSummarySchema = z.object({
   overview: z.string(),
   quick_wins: z
@@ -257,13 +276,14 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     return;
   }
 
-  const renderedPages = audit.pages.filter(
-    (page) => page.status === PageStatus.RENDERED
-  );
+  const renderedPages = audit.pages.filter((page) => page.status === PageStatus.RENDERED);
 
-  const payload = buildPromptPayload({
+  const pageInsights = await generatePageInsights(audit, renderedPages);
+
+  const payload = buildRunSummaryPrompt({
     audit,
     renderedPages,
+    pageInsights
   });
 
   let parsedSummary: AccessibilityAuditSummary | null = null;
@@ -300,8 +320,8 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
   }
 
   const structured = parsedSummary
-    ? normalizeSummary(parsedSummary, audit)
-    : buildFallbackSummary(audit, FALLBACK_OVERVIEW);
+    ? normalizeSummary(parsedSummary, audit, pageInsights)
+    : buildFallbackSummary(audit, pageInsights, FALLBACK_OVERVIEW);
 
   if (!parsedSummary) {
     console.log(
@@ -385,27 +405,222 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
   await updateAuditStatus(runId, AuditStatus.COMPLETE);
 }
 
-function buildPromptPayload({
+type NormalizedPageInsight = {
+  url: string;
+  severity: SummarySeverity;
+  summary: string;
+  recommendations: string[];
+  top_rules: Array<{
+    rule_id: string;
+    description?: string | null;
+    wcag_refs: string[];
+    count?: number | null;
+  }>;
+  quick_wins: string[];
+};
+
+async function generatePageInsights(
+  audit: AuditWithRelations,
+  renderedPages: AuditWithRelations["pages"]
+): Promise<NormalizedPageInsight[]> {
+  const insights: NormalizedPageInsight[] = [];
+
+  for (const page of renderedPages) {
+    const existing = parseStoredPageInsight(page.aiInsights);
+    if (existing) {
+      insights.push(existing);
+      continue;
+    }
+
+    const prompt = buildPageInsightPrompt(page, audit);
+    let parsed: PageInsight | null = null;
+    try {
+      const response = await openai.responses.parse({
+        model: "gpt-4o-mini",
+        input: [
+          {
+            role: "system",
+            content:
+              "Du analyserar tillgänglighetsproblem för en enskild webbsida. Svara alltid på svenska och håll dig kortfattad men handlingsorienterad."
+          },
+          {
+            role: "user",
+            content: prompt
+          }
+        ],
+        text: {
+          format: zodTextFormat(PAGE_INSIGHT_SCHEMA, "insight")
+        }
+      });
+      parsed = response.output_parsed ?? null;
+    } catch (error) {
+      console.warn(
+        "[analyze] page_insight_error",
+        JSON.stringify({
+          event: "analyze.page_insight_error",
+          runId: audit.id,
+          pageId: page.id,
+          message: error instanceof Error ? error.message : "unknown-error"
+        })
+      );
+    }
+
+    const normalized = parsed ? normalizePageInsight(parsed, page) : buildPageFallbackInsight(page);
+
+    const aiInsightsValue: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue = normalized
+      ? (normalized as unknown as Prisma.InputJsonValue)
+      : Prisma.DbNull;
+
+    await prisma.page.update({
+      where: { id: page.id },
+      data: {
+        aiInsights: aiInsightsValue
+      }
+    });
+
+    if (normalized) {
+      insights.push(normalized);
+    }
+  }
+
+  return insights;
+}
+
+function parseStoredPageInsight(value: unknown): NormalizedPageInsight | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  const candidate = value as Record<string, unknown>;
+  if (typeof candidate.summary !== "string" || typeof candidate.severity !== "string") {
+    return null;
+  }
+
+  return {
+    url: typeof candidate.url === "string" ? candidate.url : "",
+    summary: candidate.summary,
+    severity: normalizeSeverity(candidate.severity),
+    recommendations: Array.isArray(candidate.recommendations)
+      ? (candidate.recommendations.filter((item): item is string => typeof item === "string") ?? [])
+      : [],
+    top_rules:
+      Array.isArray(candidate.top_rules) && candidate.top_rules.length
+        ? candidate.top_rules
+            .map((rule) => {
+              if (!rule || typeof rule !== "object") {
+                return null;
+              }
+              const payload = rule as {
+                rule_id?: unknown;
+                description?: unknown;
+                wcag_refs?: unknown;
+                count?: unknown;
+              };
+              if (typeof payload.rule_id !== "string") {
+                return null;
+              }
+              return {
+                rule_id: payload.rule_id,
+                description:
+                  typeof payload.description === "string" || payload.description === null ? payload.description : null,
+                wcag_refs: Array.isArray(payload.wcag_refs)
+                  ? payload.wcag_refs.filter((ref): ref is string => typeof ref === "string")
+                  : [],
+                count: typeof payload.count === "number" ? payload.count : null
+              };
+            })
+            .filter(Boolean)
+        : [],
+    quick_wins: Array.isArray(candidate.quick_wins)
+      ? candidate.quick_wins.filter((item): item is string => typeof item === "string")
+      : []
+  };
+}
+
+function normalizePageInsight(insight: PageInsight, page: AuditWithRelations["pages"][number]): NormalizedPageInsight {
+  return {
+    url: page.url,
+    summary: insight.summary,
+    severity: insight.severity,
+    recommendations: insight.recommendations ?? [],
+    top_rules:
+      insight.top_rules?.map((rule) => ({
+        rule_id: rule.rule_id,
+        description: rule.description ?? null,
+        wcag_refs: rule.wcag_refs ?? [],
+        count: rule.count ?? null
+      })) ?? [],
+    quick_wins: insight.quick_wins ?? []
+  };
+}
+
+function buildPageFallbackInsight(page: AuditWithRelations["pages"][number]): NormalizedPageInsight {
+  return {
+    url: page.url,
+    summary: "Ingen AI-insikt kunde genereras för denna sida.",
+    severity: "moderate",
+    recommendations: [],
+    top_rules: [],
+    quick_wins: []
+  };
+}
+
+function normalizeSeverity(value: unknown): SummarySeverity {
+  switch (value) {
+    case "critical":
+    case "serious":
+    case "moderate":
+    case "minor":
+      return value;
+    default:
+      return "moderate";
+  }
+}
+
+function buildRunSummaryPrompt({
   audit,
   renderedPages,
+  pageInsights
 }: {
   audit: AuditWithRelations;
   renderedPages: AuditWithRelations["pages"];
+  pageInsights: NormalizedPageInsight[];
 }) {
-  const totalIssues = renderedPages.reduce<number>(
-    (sum, page) => sum + page.issues.length,
-    0
-  );
-  const totalsBySeverity = renderedPages.reduce<Record<string, number>>(
-    (acc, page) => {
-      for (const issue of page.issues) {
-        const key = issue.impact ?? "unknown";
-        acc[key] = (acc[key] ?? 0) + 1;
-      }
-      return acc;
-    },
-    {}
-  );
+  const totalIssues = renderedPages.reduce<number>((sum, page) => sum + page.issues.length, 0);
+  const totalsByImpact = renderedPages.reduce<Record<string, number>>((acc, page) => {
+    for (const issue of page.issues) {
+      const key = issue.impact ?? "unknown";
+      acc[key] = (acc[key] ?? 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  const pageIssueCounts = renderedPages.reduce<Record<string, number>>((acc, page) => {
+    acc[page.url] = page.issues.length;
+    return acc;
+  }, {});
+
+  const summarizedPages = pageInsights.map((insight) => {
+    const issueCount = pageIssueCounts[insight.url] ?? 0;
+    const limitedRecommendations = insight.recommendations.slice(0, 5);
+    const limitedQuickWins = insight.quick_wins.slice(0, 5);
+    const limitedTopRules = insight.top_rules.slice(0, 5).map((rule) => ({
+      ruleId: rule.rule_id,
+      description: rule.description ?? null,
+      wcagRefs: rule.wcag_refs,
+      count: rule.count ?? null
+    }));
+
+    return {
+      url: insight.url,
+      issueCount,
+      severity: insight.severity,
+      summary: insight.summary,
+      recommendations: limitedRecommendations,
+      quickWins: limitedQuickWins,
+      topRules: limitedTopRules
+    };
+  });
 
   const structuredData = {
     run: {
@@ -413,37 +628,64 @@ function buildPromptPayload({
       rootUrl: audit.rootUrl,
       pageCount: renderedPages.length,
       totalIssues,
-      totalsBySeverity,
+      totalsByImpact
     },
-    pages: renderedPages.map((page) => ({
-      id: page.id,
-      url: page.url,
-      httpStatus: page.httpStatus,
-      loadTimeMs: page.loadTimeMs,
-      htmlUrl: page.htmlUrl,
-      cssBundleUrl: page.cssBundleUrl,
-      screenshotUrl: page.screenshotUrl,
-      axeReportUrl: page.axeReportUrl,
-      issueCount: page.issues.length,
-      issues: page.issues.map((issue) => ({
-        ruleId: issue.ruleId,
-        impact: issue.impact,
-        wcagRefs: issue.wcagRefs,
-        helpUrl: issue.helpUrl,
-      })),
-    })),
+    pages: summarizedPages
   };
 
-  return `Audit run ${audit.id} för ${audit.rootUrl}. Totalt ${
-    renderedPages.length
-  } renderade sidor och ${totalIssues} identifierade issues.\n\nRådata (JSON):\n${JSON.stringify(
-    structuredData,
-    null,
-    2
-  )}`;
+  return `Audit run ${audit.id} för ${audit.rootUrl}. Varje sida har först analyserats separat och du får deras sammanfattningar nedan.\n\nUppgift:\n1. Läs igenom sidornas insikter.\n2. Skapa en övergripande tillgänglighetsrapport på svenska som sammanfattar helheten, grupperar återkommande problem och lyfter snabba vinster.\n3. Inkludera rekommendationer och nästa steg baserat på de aggregerade insikterna.\n\nUnderlag (JSON):\n${JSON.stringify(structuredData, null, 2)}`;
 }
 
-function normalizeSummary(summary: AccessibilityAuditSummary, audit: AuditWithRelations): NormalizedSummary {
+function buildPageInsightPrompt(page: AuditWithRelations["pages"][number], audit: AuditWithRelations): string {
+  const impactCounts = page.issues.reduce<Record<string, number>>((acc, issue) => {
+    const key = (issue.impact ?? "unknown").toString();
+    acc[key] = (acc[key] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const topIssues = page.issues.slice(0, 15).map((issue) => {
+    let selectors: string[] = [];
+    let summary: string | undefined;
+    if (issue.nodes && typeof issue.nodes === "object") {
+      const payload = issue.nodes as Record<string, unknown>;
+      if (Array.isArray(payload.target)) {
+        selectors = payload.target.filter((selector): selector is string => typeof selector === "string").slice(0, 3);
+      } else if (typeof payload.target === "string") {
+        selectors = [payload.target];
+      }
+      if (typeof payload.failureSummary === "string") {
+        summary = payload.failureSummary;
+      }
+    }
+    return {
+      ruleId: issue.ruleId,
+      impact: issue.impact,
+      helpUrl: issue.helpUrl,
+      selectors,
+      summary
+    };
+  });
+
+  return `Du analyserar sidan ${page.url} inom audit ${audit.id}.
+
+Metadata:
+- Status: ${page.status}
+- HTTP-status: ${page.httpStatus ?? "okänt"}
+- Laddtid: ${page.loadTimeMs ?? "okänt"} ms
+- Antal problem: ${page.issues.length}
+- Fördelning efter impact: ${JSON.stringify(impactCounts)}
+
+Nedan ser du en lista med de viktigaste problemen. Varje post innehåller regel-id, impact och eventuell sammanfattning:
+${JSON.stringify(topIssues, null, 2)}
+
+Sammanfatta kort vad som behöver åtgärdas, vilken allvarlighetsgrad sidan har, föreslå max tre konkreta rekommendationer och lyft eventuella snabba vinster.`;
+}
+
+function normalizeSummary(
+  summary: AccessibilityAuditSummary,
+  audit: AuditWithRelations,
+  pageInsights: NormalizedPageInsight[]
+): NormalizedSummary {
   const metrics = summary.metrics ?? {
     total_pages: audit.pages.length,
     total_issues: audit.pages.reduce<number>((sum, page) => sum + page.issues.length, 0),
@@ -486,23 +728,35 @@ function normalizeSummary(summary: AccessibilityAuditSummary, audit: AuditWithRe
     },
     follow_up_actions: summary.follow_up_actions ?? [],
     page_summaries:
-      summary.page_classifications?.map((classification) => ({
-        url: classification.url,
-        severity: classification.severity,
-        summary: classification.summary,
-        top_rules:
-          classification.top_rules?.map((rule) => ({
-            rule_id: rule.rule_id,
-            description: rule.description ?? null,
-            wcag_refs: rule.wcag_refs ?? [],
-            count: rule.count ?? null,
-          })) ?? [],
-        recommendations: classification.recommendations ?? [],
-      })) ?? [],
+      summary.page_classifications && summary.page_classifications.length
+        ? summary.page_classifications.map((classification) => ({
+            url: classification.url,
+            severity: classification.severity,
+            summary: classification.summary,
+            top_rules:
+              classification.top_rules?.map((rule) => ({
+                rule_id: rule.rule_id,
+                description: rule.description ?? null,
+                wcag_refs: rule.wcag_refs ?? [],
+                count: rule.count ?? null
+              })) ?? [],
+            recommendations: classification.recommendations ?? []
+          }))
+        : pageInsights.map((insight) => ({
+            url: insight.url,
+            severity: insight.severity,
+            summary: insight.summary,
+            top_rules: insight.top_rules,
+            recommendations: insight.recommendations
+          })),
   } satisfies NormalizedSummary;
 }
 
-function buildFallbackSummary(audit: AuditWithRelations, overrideOverview?: string): NormalizedSummary {
+function buildFallbackSummary(
+  audit: AuditWithRelations,
+  pageInsights: NormalizedPageInsight[],
+  overrideOverview?: string
+): NormalizedSummary {
   return {
     overview: overrideOverview ?? FALLBACK_OVERVIEW,
     quick_wins: [],
@@ -516,7 +770,15 @@ function buildFallbackSummary(audit: AuditWithRelations, overrideOverview?: stri
       issues_by_severity: {},
     },
     follow_up_actions: [],
-    page_summaries: [],
+    page_summaries: pageInsights.length
+      ? pageInsights.map((insight) => ({
+          url: insight.url,
+          severity: insight.severity,
+          summary: insight.summary,
+          top_rules: insight.top_rules,
+          recommendations: insight.recommendations
+        }))
+      : [],
   };
 }
 

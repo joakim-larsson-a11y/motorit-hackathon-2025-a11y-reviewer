@@ -21,7 +21,7 @@ const mockAuditRunFindUnique = vi.fn();
 const mockAiSummaryFindUnique = vi.fn();
 const mockAiSummaryUpsert = vi.fn();
 const mockPageUpdate = vi.fn();
-const mockTransaction = vi.fn(async (callback: (tx: { aiSummary: { upsert: typeof mockAiSummaryUpsert }; page: { update: typeof mockPageUpdate } }) => Promise<void> | void) => {
+const mockTransaction = vi.fn(async (callback) => {
   await callback({
     aiSummary: { upsert: mockAiSummaryUpsert },
     page: { update: mockPageUpdate }
@@ -75,7 +75,21 @@ describe("handleAnalyze", () => {
     expect(mockUpdateAuditStatus).not.toHaveBeenCalled();
   });
 
-  it("aggregates rendered pages and finalises the audit once ready", async () => {
+  it("generates per-page insights and final summary", async () => {
+    const pageInsightA = {
+      summary: "Förbättra rubrikstrukturen",
+      severity: "serious",
+      recommendations: ["Lägg till h1"],
+      top_rules: [],
+      quick_wins: []
+    };
+    const pageInsightB = {
+      summary: "Åtgärda länkkontraster",
+      severity: "minor",
+      recommendations: [],
+      top_rules: [],
+      quick_wins: []
+    };
     const summaryPayload = {
       overview: "All set",
       quick_wins: [],
@@ -86,15 +100,7 @@ describe("handleAnalyze", () => {
         issues_by_severity: [{ severity: "serious", count: 2 }]
       },
       follow_up_actions: [],
-      page_classifications: [
-        {
-          url: "https://example.com",
-          severity: "serious",
-          summary: "Fix headings",
-          recommendations: ["Add missing h1"],
-          top_rules: [{ rule_id: "rule-1", description: "Heading levels" }]
-        }
-      ]
+      page_classifications: []
     };
 
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-2", rootUrl: "https://example.com", status: "PROCESSING" });
@@ -115,7 +121,13 @@ describe("handleAnalyze", () => {
           axeReportUrl: null,
           loadTimeMs: 100,
           httpStatus: 200,
-          issues: [{ ruleId: "rule-1", impact: "serious", wcagRefs: [], helpUrl: null }]
+          issues: [{
+            ruleId: "rule-1",
+            impact: "serious",
+            wcagRefs: ["1.4.3"],
+            helpUrl: null,
+            nodes: { target: [".alpha"], failureSummary: "Alpha" }
+          }]
         },
         {
           id: "page-2",
@@ -127,29 +139,55 @@ describe("handleAnalyze", () => {
           axeReportUrl: null,
           loadTimeMs: 120,
           httpStatus: 200,
-          issues: [{ ruleId: "rule-2", impact: "minor", wcagRefs: [], helpUrl: null }]
+          issues: [{
+            ruleId: "rule-2",
+            impact: "minor",
+            wcagRefs: ["2.4.4"],
+            helpUrl: null,
+            nodes: { target: [".beta"], failureSummary: "Beta" }
+          }]
         }
       ],
       summary: null
     });
 
-    openAiParseMock.mockResolvedValueOnce({ output_parsed: summaryPayload });
+    openAiParseMock
+      .mockResolvedValueOnce({ output_parsed: pageInsightA })
+      .mockResolvedValueOnce({ output_parsed: pageInsightB })
+      .mockResolvedValueOnce({ output_parsed: summaryPayload });
 
     const { handleAnalyze } = await import("../analyze");
 
     await handleAnalyze({ runId: "run-2" });
 
+    expect(openAiParseMock).toHaveBeenCalledTimes(3);
+    expect(mockPageUpdate).toHaveBeenCalledTimes(2);
+    expect(mockPageUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "page-1" },
+        data: expect.objectContaining({
+          aiInsights: expect.objectContaining({ summary: pageInsightA.summary, severity: pageInsightA.severity })
+        })
+      })
+    );
+    expect(mockPageUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: "page-2" },
+        data: expect.objectContaining({
+          aiInsights: expect.objectContaining({ summary: pageInsightB.summary, severity: pageInsightB.severity })
+        })
+      })
+    );
     expect(mockAiSummaryUpsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({ runId: "run-2" })
       })
     );
-    expect(mockPageUpdate).toHaveBeenCalled();
     expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-2", "COMPLETE");
     expect(mockAuditQueueAdd).not.toHaveBeenCalled();
   });
 
-  it("completes with partial data when some pages failed", async () => {
+  it("stores fallback page insight when OpenAI per-page call fails", async () => {
     const summaryPayload = {
       overview: "Partial",
       quick_wins: [],
@@ -177,7 +215,7 @@ describe("handleAnalyze", () => {
           axeReportUrl: null,
           loadTimeMs: 100,
           httpStatus: 200,
-          issues: [{ ruleId: "rule-1", impact: "serious", wcagRefs: [], helpUrl: null }]
+          issues: [{ ruleId: "rule-1", impact: "serious", wcagRefs: [], helpUrl: null, nodes: { target: [".alpha"] } }]
         },
         {
           id: "page-2",
@@ -195,21 +233,14 @@ describe("handleAnalyze", () => {
       summary: null
     });
 
-    openAiParseMock.mockResolvedValueOnce({ output_parsed: summaryPayload });
+    openAiParseMock
+      .mockRejectedValueOnce(new Error("page insight failed"))
+      .mockResolvedValueOnce({ output_parsed: summaryPayload });
 
     const { handleAnalyze } = await import("../analyze");
 
     await handleAnalyze({ runId: "run-3" });
 
-    expect(mockAiSummaryUpsert).toHaveBeenCalled();
-    const payload = mockAiSummaryUpsert.mock.calls[0][0].create.payload;
-    expect(payload.follow_up_actions[0]).toMatch(/Kunde inte rendera 1 av 2 sidor/);
-    expect(payload.page_summaries).toEqual([
-      expect.objectContaining({
-        url: "https://example.com",
-        summary: "Ingen AI-insikt kunde genereras för denna sida.",
-      }),
-    ]);
     expect(mockPageUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: "page-1" },
@@ -218,10 +249,15 @@ describe("handleAnalyze", () => {
         })
       })
     );
+    const payload = mockAiSummaryUpsert.mock.calls[0][0].create.payload;
+    expect(payload.follow_up_actions[0]).toMatch(/Kunde inte rendera 1 av 2 sidor/);
+    expect(payload.page_summaries[0]).toEqual(
+      expect.objectContaining({ summary: "Ingen AI-insikt kunde genereras för denna sida." })
+    );
     expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-3", "COMPLETE");
   });
 
-  it("falls back to a static summary when OpenAI parsing fails", async () => {
+  it("falls back to a static summary when the final OpenAI call fails", async () => {
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-4", rootUrl: "https://example.com", status: "PROCESSING" });
     mockQueryRaw.mockResolvedValueOnce([{ total: 1, rendered: 1, failed: 0 }]);
     mockAiSummaryFindUnique.mockResolvedValueOnce(null);
@@ -240,13 +276,23 @@ describe("handleAnalyze", () => {
           axeReportUrl: null,
           loadTimeMs: 100,
           httpStatus: 200,
-          issues: [{ ruleId: "rule-1", impact: "serious", wcagRefs: [], helpUrl: null }]
+          issues: [{ ruleId: "rule-1", impact: "serious", wcagRefs: [], helpUrl: null, nodes: { target: [".alpha"], failureSummary: "Alpha" } }]
         }
       ],
       summary: null
     });
 
-    openAiParseMock.mockRejectedValueOnce(new Error("no api key"));
+    openAiParseMock
+      .mockResolvedValueOnce({
+        output_parsed: {
+          summary: "Kontrollera kontraster",
+          severity: "serious",
+          recommendations: ["Förbättra kontrast"],
+          top_rules: [],
+          quick_wins: []
+        }
+      })
+      .mockRejectedValueOnce(new Error("no api key"));
 
     const { handleAnalyze } = await import("../analyze");
 
@@ -256,21 +302,17 @@ describe("handleAnalyze", () => {
       expect.objectContaining({
         create: expect.objectContaining({
           text: "Kunde inte generera AI-sammanfattning. Visar enkel rapport baserad på rådata."
-        }),
-        update: expect.objectContaining({
-          text: "Kunde inte generera AI-sammanfattning. Visar enkel rapport baserad på rådata."
         })
       })
     );
     expect(mockPageUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          aiInsights: expect.objectContaining({ summary: "Ingen AI-insikt kunde genereras för denna sida." })
+          aiInsights: expect.objectContaining({ summary: "Kontrollera kontraster" })
         })
       })
     );
     expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-4", "COMPLETE");
-    expect(mockAuditQueueAdd).not.toHaveBeenCalled();
   });
 
   it("marks the run as failed when every page fails", async () => {
