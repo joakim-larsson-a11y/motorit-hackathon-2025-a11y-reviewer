@@ -122,7 +122,20 @@ function extractLocs(node: unknown, childKey: string): string[] {
 
   const entries = Array.isArray(entry) ? entry : [entry];
 
+  const seen = new Set<string>();
   const urls: string[] = [];
+  const pushUrl = (value: unknown) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const trimmed = value.trim();
+    if (!trimmed || seen.has(trimmed)) {
+      return;
+    }
+    seen.add(trimmed);
+    urls.push(trimmed);
+  };
+
   for (const item of entries) {
     if (!item || typeof item !== "object") {
       continue;
@@ -131,14 +144,38 @@ function extractLocs(node: unknown, childKey: string): string[] {
     const data = item as Record<string, unknown>;
     const locEntry = Object.entries(data).find(([key]) => key.toLowerCase().includes("loc"));
     if (!locEntry) {
+      extractAlternateLinks(data, pushUrl);
       continue;
     }
 
     const locValue = locEntry[1];
-    if (typeof locValue === "string") {
-      urls.push(locValue.trim());
-    }
+    pushUrl(locValue);
+
+    extractAlternateLinks(data, pushUrl);
   }
 
-  return urls.filter(Boolean);
+  return urls;
+}
+
+function extractAlternateLinks(
+  data: Record<string, unknown>,
+  pushUrl: (value: unknown) => void
+) {
+  for (const [key, raw] of Object.entries(data)) {
+    const lower = key.toLowerCase();
+    if (!lower.includes("link")) {
+      continue;
+    }
+
+    const candidates = Array.isArray(raw) ? raw : [raw];
+    for (const candidate of candidates) {
+      if (!candidate || typeof candidate !== "object") {
+        continue;
+      }
+
+      const node = candidate as Record<string, unknown>;
+      const href = node["@_href"] ?? node.href;
+      pushUrl(href);
+    }
+  }
 }
