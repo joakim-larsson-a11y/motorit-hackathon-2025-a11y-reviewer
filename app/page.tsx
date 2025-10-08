@@ -212,12 +212,14 @@ function AuditLauncher() {
         <input
           id="root-url"
           name="root-url"
-          type="url"
+          type="text"
           required
-          placeholder="https://www.exempel.se"
+          placeholder="www.exempel.se"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
           className="mt-2 w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-900 outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/40 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100"
+          autoComplete="url"
+          inputMode="url"
         />
       </div>
       {error ? (

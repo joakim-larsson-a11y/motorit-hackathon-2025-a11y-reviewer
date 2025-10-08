@@ -458,8 +458,43 @@ function normalizeUrl(rawUrl: string, base?: URL): string | null {
 function isSameOrigin(url: string, origin: URL): boolean {
   try {
     const parsed = new URL(url);
-    return parsed.origin === origin.origin;
+    if (parsed.origin === origin.origin) {
+      return true;
+    }
+
+    const parsedHost = normalizeHostname(parsed.hostname);
+    const originHost = normalizeHostname(origin.hostname);
+    if (parsedHost !== originHost) {
+      return false;
+    }
+
+    if (parsed.protocol !== origin.protocol) {
+      return false;
+    }
+
+    return getPort(parsed) === getPort(origin);
   } catch {
     return false;
   }
 }
+
+function normalizeHostname(hostname: string): string {
+  return hostname.replace(/^www\./i, "");
+}
+
+function getPort(url: URL): string {
+  if (url.port) {
+    return url.port;
+  }
+  if (url.protocol === "https:") {
+    return "443";
+  }
+  if (url.protocol === "http:") {
+    return "80";
+  }
+  return "";
+}
+
+export const __testables = {
+  isSameOrigin,
+};
