@@ -167,10 +167,9 @@ function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: st
         <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <th scope="col" className="py-3 pr-4">URL</th>
+              <th scope="col" className="py-3 pr-4">Titel</th>
               <th scope="col" className="py-3 pr-4">Status</th>
               <th scope="col" className="py-3 pr-4"># Issues</th>
-              <th scope="col" className="py-3 pr-4">Screenshot</th>
               <th scope="col" className="py-3 pr-4">Uppdaterad</th>
             </tr>
           </thead>
@@ -183,9 +182,10 @@ function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: st
                       href={`/audits/${runId}/pages/${page.id}`}
                       className="font-medium text-slate-900 underline decoration-dotted underline-offset-4 transition hover:text-brand dark:text-slate-100"
                     >
-                      {page.url}
+                      {deriveTitleFromUrl(page.url)}
                     </Link>
                     <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                      <span className="break-all">{page.url}</span>
                       {page.httpStatus ? <span>HTTP {page.httpStatus}</span> : null}
                       {typeof page.loadTimeMs === "number" ? <span>{page.loadTimeMs} ms</span> : null}
                     </div>
@@ -195,18 +195,6 @@ function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: st
                   <StatusBadge status={page.status as PageStatus} />
                 </td>
                 <td className="py-3 pr-4">{page.issueCount}</td>
-                <td className="py-3 pr-4">
-                  {page.screenshotUrl ? (
-                    <img
-                      src={page.screenshotUrl}
-                      alt={buildScreenshotAlt(page.url)}
-                      loading="lazy"
-                      className="h-20 w-32 rounded-md object-cover shadow-sm"
-                    />
-                  ) : (
-                    <span className="text-xs text-slate-500 dark:text-slate-400">Ingen skärmbild</span>
-                  )}
-                </td>
                 <td className="py-3 pr-4 text-xs text-slate-500 dark:text-slate-400">
                   {formatTimestamp(page.updatedAt)}
                 </td>
@@ -228,12 +216,24 @@ function SummaryTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function buildScreenshotAlt(url: string): string {
+function deriveTitleFromUrl(url: string): string {
   try {
     const parsed = new URL(url);
-    return `Skärmbild av ${parsed.hostname}${parsed.pathname}`;
+    const path = decodeURIComponent(parsed.pathname.replace(/\+/g, " "));
+    const readable = path
+      .split("/")
+      .filter(Boolean)
+      .map((segment) =>
+        segment
+          .replace(/-/g, " ")
+          .replace(/_/g, " ")
+          .replace(/\s+/g, " ")
+          .replace(/\b\w/g, (char) => char.toUpperCase())
+      )
+      .join(" / ");
+    return readable.length > 0 ? readable : parsed.hostname;
   } catch {
-    return "Skärmbild av sidan";
+    return url;
   }
 }
 

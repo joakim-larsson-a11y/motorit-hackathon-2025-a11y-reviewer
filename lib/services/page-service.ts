@@ -5,7 +5,7 @@ import type { Issue } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import type { AxeResults, PageDetailsVM } from "@/lib/types/axe";
 
-type IssueRecord = Pick<Issue, "ruleId" | "impact" | "helpUrl" | "html" | "nodes">;
+type IssueRecord = Pick<Issue, "ruleId" | "impact" | "helpUrl" | "html" | "nodes" | "wcagRefs">;
 
 const IMPACT_ORDER = ["critical", "serious", "moderate", "minor"] as const;
 
@@ -65,13 +65,7 @@ async function loadAxeReport(url?: string | null): Promise<AxeResults | null> {
       return null;
     }
     const json = (await response.json()) as unknown;
-    if (!json || typeof json !== "object") {
-      return null;
-    }
-    if (!Array.isArray((json as AxeResults).violations)) {
-      return null;
-    }
-    return json as AxeResults;
+    return normalizeAxeResults(json);
   } catch (error) {
     console.warn(
       "[page-service] axe_report_fetch_failed",
@@ -85,7 +79,10 @@ async function loadAxeReport(url?: string | null): Promise<AxeResults | null> {
 }
 
 export function groupIssuesIntoViolations(issues: IssueRecord[]): AxeResults {
-  const grouped = new Map<string, { violation: AxeResults["violations"][number]; order: number }>();
+  const grouped = new Map<
+    string,
+    { violation: AxeResults["violations"][number]; order: number; wcag: Set<string> }
+  >();
 
   for (const issue of issues) {
     const key = issue.ruleId;
@@ -100,11 +97,21 @@ export function groupIssuesIntoViolations(issues: IssueRecord[]): AxeResults {
           help: issue.helpUrl ? `Se vägledning: ${issue.helpUrl}` : issue.ruleId,
           helpUrl: issue.helpUrl ?? "",
           description: issue.html ?? undefined,
-          nodes: []
+          nodes: [],
+          wcag: []
         },
-        order: IMPACT_ORDER.indexOf(impact as (typeof IMPACT_ORDER)[number])
+        order: IMPACT_ORDER.indexOf(impact as (typeof IMPACT_ORDER)[number]),
+        wcag: new Set<string>()
       };
       grouped.set(key, record);
+    }
+
+    if (Array.isArray(issue.wcagRefs)) {
+      for (const ref of issue.wcagRefs) {
+        if (typeof ref === "string" && ref.trim() !== "") {
+          record.wcag.add(ref);
+        }
+      }
     }
 
     const nodesPayload = normalizeNode(issue.nodes);
@@ -124,7 +131,10 @@ export function groupIssuesIntoViolations(issues: IssueRecord[]): AxeResults {
       }
       return a.order - b.order;
     })
-    .map((entry) => entry.violation);
+    .map((entry) => ({
+      ...entry.violation,
+      wcag: Array.from(entry.wcag).sort()
+    }));
 
   return { violations };
 }
@@ -155,5 +165,60 @@ function normalizeNode(value: unknown): AxeResults["violations"][number]["nodes"
     target: targets,
     failureSummary: node.failureSummary,
     html: node.html
+  };
+}
+
+function normalizeAxeResults(raw: unknown): AxeResults | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+
+  const source = raw as { violations?: unknown[] };
+  if (!Array.isArray(source.violations)) {
+    return null;
+  }
+
+  const violations = source.violations.map((violationRaw) => {
+    if (!violationRaw || typeof violationRaw !== "object") {
+      return null;
+    }
+
+    const violation = violationRaw as {
+      id?: unknown;
+      impact?: unknown;
+      help?: unknown;
+      helpUrl?: unknown;
+      description?: unknown;
+      tags?: unknown;
+      wcag?: unknown;
+      nodes?: unknown;
+    };
+
+    const wcagFromTags =
+      Array.isArray(violation.tags) && violation.tags.length
+        ? violation.tags.filter((tag): tag is string => typeof tag === "string" && tag.toLowerCase().startsWith("wcag"))
+        : [];
+    const wcagExplicit =
+      Array.isArray(violation.wcag) && violation.wcag.length
+        ? violation.wcag.filter((tag): tag is string => typeof tag === "string")
+        : [];
+
+    const wcag = Array.from(new Set([...wcagFromTags, ...wcagExplicit]));
+
+    return {
+      id: typeof violation.id === "string" ? violation.id : String(violation.id ?? "unknown"),
+      impact: normalizeImpact(typeof violation.impact === "string" ? violation.impact : null),
+      help: typeof violation.help === "string" ? violation.help : "",
+      helpUrl: typeof violation.helpUrl === "string" ? violation.helpUrl : "",
+      description: typeof violation.description === "string" ? violation.description : undefined,
+      wcag,
+      nodes: Array.isArray(violation.nodes)
+        ? violation.nodes.map((node) => normalizeNode(node))
+        : []
+    };
+  });
+
+  return {
+    violations: violations.filter((item): item is AxeResults["violations"][number] => Boolean(item))
   };
 }

@@ -10,6 +10,7 @@ describe("groupIssuesIntoViolations", () => {
         impact: "serious",
         helpUrl: "https://example.com/contrast",
         html: "<div>Foo</div>",
+        wcagRefs: ["1.4.3"],
         nodes: {
           target: [".foo"],
           failureSummary: "Element has insufficient contrast"
@@ -20,6 +21,7 @@ describe("groupIssuesIntoViolations", () => {
         impact: "serious",
         helpUrl: "https://example.com/contrast",
         html: "<span>Bar</span>",
+        wcagRefs: ["1.4.3"],
         nodes: {
           target: [".bar"],
           failureSummary: "Another occurrence"
@@ -30,6 +32,7 @@ describe("groupIssuesIntoViolations", () => {
         impact: "moderate",
         helpUrl: null,
         html: null,
+        wcagRefs: ["1.1.1"],
         nodes: {
           target: ["#input"],
           failureSummary: "Input lacks label"
@@ -40,6 +43,8 @@ describe("groupIssuesIntoViolations", () => {
     expect(result.violations).toHaveLength(2);
     expect(result.violations[0].id).toBe("color-contrast");
     expect(result.violations[0].nodes).toHaveLength(2);
+    expect(result.violations[0].wcag).toEqual(["1.4.3"]);
     expect(result.violations[1].id).toBe("label");
+    expect(result.violations[1].wcag).toEqual(["1.1.1"]);
   });
 });

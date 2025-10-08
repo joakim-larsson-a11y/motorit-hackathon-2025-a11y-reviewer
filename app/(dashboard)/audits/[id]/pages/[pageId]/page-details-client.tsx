@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { PageStatus } from "@prisma/client";
@@ -10,6 +10,8 @@ import type { PageDetailsVM } from "@/lib/types/axe";
 import { AxeIssues } from "@/components/page/axe-issues";
 
 export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
+  const [isModalOpen, setModalOpen] = useState(false);
+
   const formattedUrl = useMemo(() => {
     try {
       const parsed = new URL(details.url);
@@ -28,6 +30,21 @@ export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
     }
   }, [details.url]);
 
+  const closeModal = useCallback(() => setModalOpen(false), []);
+
+  useEffect(() => {
+    if (!isModalOpen) {
+      return;
+    }
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setModalOpen(false);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [isModalOpen]);
+
   return (
     <>
       <nav className="mb-4">
@@ -42,9 +59,13 @@ export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
         <header className="flex flex-col gap-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
           <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 break-all">{formattedUrl}</h1>
+              <h1 className="text-2xl font-semibold text-slate-900 dark:text-slate-100 break-all">
+                {formattedUrl}
+              </h1>
               {details.httpStatus ? (
-                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">HTTP-status: {details.httpStatus}</p>
+                <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
+                  HTTP-status: {details.httpStatus}
+                </p>
               ) : null}
               <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                 Uppdaterad {formatTimestamp(details.updatedAt)}
@@ -56,20 +77,65 @@ export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
 
         <section className="grid gap-6 lg:grid-cols-[2fr,1fr]">
           <article className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Skärmbild</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              Skärmbild
+            </h2>
             {details.screenshot ? (
-              <img
-                src={details.screenshot}
-                alt={screenshotAlt}
-                loading="lazy"
-                className="w-full max-w-xl rounded-xl border border-slate-200 object-cover shadow-md dark:border-slate-800"
-              />
+              <>
+                <button
+                  type="button"
+                  onClick={() => setModalOpen(true)}
+                  className="group relative inline-flex max-w-xs flex-col overflow-hidden rounded-xl border border-slate-200 shadow-sm transition hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand dark:border-slate-700"
+                >
+                  <img
+                    src={details.screenshot}
+                    alt={screenshotAlt}
+                    loading="lazy"
+                    className="h-40 w-full object-contain"
+                  />
+                  <span className="block bg-slate-900/80 px-3 py-1 text-center text-xs font-medium text-white opacity-0 transition group-hover:opacity-100">
+                    Klicka för att visa i full storlek
+                  </span>
+                </button>
+                {isModalOpen ? (
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-label="Stor skärmbild"
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+                    onClick={(event) => {
+                      if (event.target === event.currentTarget) {
+                        closeModal();
+                      }
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={closeModal}
+                      className="absolute right-2 top-2 rounded-full bg-black px-3 py-1 text-sm font-medium text-white transition hover:bg-black/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
+                    >
+                      Stäng
+                    </button>
+                    <div className="relative w-full max-w-5xl max-h-[95vh] overflow-auto">
+                      <img
+                        src={details.screenshot}
+                        alt={screenshotAlt}
+                        className=" w-full rounded-lg h-auto shadow-2xl"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : (
-              <p className="text-sm text-slate-600 dark:text-slate-400">Ingen skärmbild tillgänglig för denna sida.</p>
+              <p className="text-sm text-slate-600 dark:text-slate-400">
+                Ingen skärmbild tillgänglig för denna sida.
+              </p>
             )}
           </article>
           <article className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Artefakter</h2>
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              Artefakter
+            </h2>
             <ul className="space-y-3 text-sm text-brand">
               {details.artifacts.html ? (
                 <li>
@@ -80,18 +146,6 @@ export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
                     className="underline decoration-dotted underline-offset-4 transition hover:text-brand/80"
                   >
                     Öppna HTML-snapshot
-                  </a>
-                </li>
-              ) : null}
-              {details.artifacts.axe ? (
-                <li>
-                  <a
-                    href={details.artifacts.axe}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="underline decoration-dotted underline-offset-4 transition hover:text-brand/80"
-                  >
-                    Öppna axe JSON
                   </a>
                 </li>
               ) : null}
@@ -107,22 +161,29 @@ export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
                   </a>
                 </li>
               ) : null}
-              {!details.artifacts.html && !details.artifacts.axe && !details.artifacts.log ? (
-                <li className="text-slate-500 dark:text-slate-400">Inga artefakter tillgängliga.</li>
+              {!details.artifacts.html &&
+              !details.artifacts.axe &&
+              !details.artifacts.log ? (
+                <li className="text-slate-500 dark:text-slate-400">
+                  Inga artefakter tillgängliga.
+                </li>
               ) : null}
             </ul>
           </article>
         </section>
 
         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">AI-insikt</h2>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            AI-insikt
+          </h2>
           {details.aiInsight ? (
             <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300 whitespace-pre-line">
               {details.aiInsight}
             </p>
           ) : (
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              Ingen AI-insikt genererades ännu. Kontrollera senare eller kör en ny analys.
+              Ingen AI-insikt genererades ännu. Kontrollera senare eller kör en
+              ny analys.
             </p>
           )}
         </section>
@@ -130,9 +191,12 @@ export function PageDetailsClient({ details }: { details: PageDetailsVM }) {
         <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
           <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
             <div>
-              <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">axe-core issues</h2>
+              <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+                axe-core issues
+              </h2>
               <p className="text-sm text-slate-600 dark:text-slate-400">
-                Totalt {details.issueCount} hittade {details.issueCount === 1 ? "problem" : "problem"}.
+                Totalt {details.issueCount} hittade{" "}
+                {details.issueCount === 1 ? "problem" : "problem"}.
               </p>
             </div>
             <ImpactLegend counts={details.impactCounts} />

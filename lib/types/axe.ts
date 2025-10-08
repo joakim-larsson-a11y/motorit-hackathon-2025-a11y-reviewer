@@ -5,6 +5,7 @@ export type AxeResults = {
     help: string;
     helpUrl: string;
     description?: string;
+    wcag: string[];
     nodes: Array<{
       html?: string;
       target: string[];
