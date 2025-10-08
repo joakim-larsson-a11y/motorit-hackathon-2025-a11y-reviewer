@@ -170,7 +170,8 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
 
   if (
     auditMeta.status === AuditStatus.FAILED ||
-    auditMeta.status === AuditStatus.COMPLETE
+    auditMeta.status === AuditStatus.COMPLETE_WITH_ISSUES ||
+    auditMeta.status === AuditStatus.COMPLETE_NO_ISSUES
   ) {
     console.log(
       "[analyze] skip_status",
@@ -197,7 +198,7 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     return;
   }
 
-  const processedCount = progress.rendered + progress.failed;
+  const processedCount = progress.completedWithIssues + progress.completedWithoutIssues + progress.failed;
 
   if (processedCount < progress.total) {
     console.log(
@@ -206,8 +207,11 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
         event: "analyze.waiting_for_pages",
         runId,
         total: progress.total,
-        rendered: progress.rendered,
+        completedWithIssues: progress.completedWithIssues,
+        completedWithoutIssues: progress.completedWithoutIssues,
         failed: progress.failed,
+        inProgress: progress.inProgress,
+        queued: progress.queued,
       })
     );
     const requeueId = `analyze-${runId}-${Date.now()}`;
@@ -224,14 +228,15 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     return;
   }
 
-  if (progress.rendered === 0 && progress.failed > 0) {
+  if ((progress.completedWithIssues + progress.completedWithoutIssues) === 0 && progress.failed > 0) {
     console.log(
       "[analyze] pages_failed",
       JSON.stringify({
         event: "analyze.pages_failed",
         runId,
         total: progress.total,
-        rendered: progress.rendered,
+        completedWithIssues: progress.completedWithIssues,
+        completedWithoutIssues: progress.completedWithoutIssues,
         failed: progress.failed,
       })
     );
@@ -246,7 +251,8 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
         event: "analyze.partial_pages",
         runId,
         total: progress.total,
-        rendered: progress.rendered,
+        completedWithIssues: progress.completedWithIssues,
+        completedWithoutIssues: progress.completedWithoutIssues,
         failed: progress.failed,
       })
     );
@@ -276,7 +282,11 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     return;
   }
 
-  const renderedPages = audit.pages.filter((page) => page.status === PageStatus.RENDERED);
+  const renderedPages = audit.pages.filter(
+    (page) =>
+      page.status === PageStatus.COMPLETE_WITH_ISSUES ||
+      page.status === PageStatus.COMPLETE_NO_ISSUES
+  );
 
   const pageInsights = await generatePageInsights(audit, renderedPages);
 
@@ -402,7 +412,11 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     })
   );
 
-  await updateAuditStatus(runId, AuditStatus.COMPLETE);
+  const hasIssues = renderedPages.some((page) => page.status === PageStatus.COMPLETE_WITH_ISSUES);
+  await updateAuditStatus(
+    runId,
+    hasIssues ? AuditStatus.COMPLETE_WITH_ISSUES : AuditStatus.COMPLETE_NO_ISSUES
+  );
 }
 
 type NormalizedPageInsight = {
@@ -784,21 +798,42 @@ function buildFallbackSummary(
 
 async function getRenderProgress(
   runId: string
-): Promise<{ total: number; rendered: number; failed: number }> {
+): Promise<{
+  total: number;
+  queued: number;
+  inProgress: number;
+  completedWithIssues: number;
+  completedWithoutIssues: number;
+  failed: number;
+}> {
   const [row] = await prisma.$queryRaw<
-    { total: bigint; rendered: bigint | null; failed: bigint | null }[]
+    {
+      total: bigint;
+      queued: bigint | null;
+      in_progress: bigint | null;
+      with_issues: bigint | null;
+      without_issues: bigint | null;
+      failed: bigint | null;
+    }[]
   >`
     SELECT
       COUNT(*)::bigint AS total,
-      SUM(CASE WHEN "status" = 'RENDERED' THEN 1 ELSE 0 END)::bigint AS rendered,
+      SUM(CASE WHEN "status" = 'QUEUED' THEN 1 ELSE 0 END)::bigint AS queued,
+      SUM(CASE WHEN "status" = 'IN_PROGRESS' THEN 1 ELSE 0 END)::bigint AS in_progress,
+      SUM(CASE WHEN "status" = 'COMPLETE_WITH_ISSUES' THEN 1 ELSE 0 END)::bigint AS with_issues,
+      SUM(CASE WHEN "status" = 'COMPLETE_NO_ISSUES' THEN 1 ELSE 0 END)::bigint AS without_issues,
       SUM(CASE WHEN "status" = 'FAILED' THEN 1 ELSE 0 END)::bigint AS failed
     FROM "Page"
     WHERE "runId" = ${runId}
   `;
 
   const total = row ? Number(row.total) : 0;
-  const rendered = row?.rendered != null ? Number(row.rendered) : 0;
-  const failed = row?.failed != null ? Number(row.failed) : 0;
-
-  return { total, rendered, failed };
+  return {
+    total,
+    queued: row?.queued != null ? Number(row.queued) : 0,
+    inProgress: row?.in_progress != null ? Number(row.in_progress) : 0,
+    completedWithIssues: row?.with_issues != null ? Number(row.with_issues) : 0,
+    completedWithoutIssues: row?.without_issues != null ? Number(row.without_issues) : 0,
+    failed: row?.failed != null ? Number(row.failed) : 0,
+  };
 }

@@ -10,7 +10,7 @@ const sampleRows: HistoryRow[] = [
     id: "run-1",
     createdAt: "2024-01-02T10:00:00.000Z",
     rootUrl: "https://example.com/a",
-    status: "COMPLETE",
+    status: "COMPLETE_WITH_ISSUES",
     issueTotal: 5
   },
   {
@@ -63,7 +63,7 @@ describe("HistoryTable", () => {
           [
             "2024-01-02 10:00",
             "example.com/a",
-            "Klar",
+            "Klar med problem",
             "View audit for example.com/a",
             "5",
           ],

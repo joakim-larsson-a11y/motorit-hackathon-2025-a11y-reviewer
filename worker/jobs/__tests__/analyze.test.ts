@@ -59,7 +59,9 @@ describe("handleAnalyze", () => {
 
   it("requeues analyze when pages are still rendering", async () => {
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-1", rootUrl: "https://example.com", status: "PROCESSING" });
-    mockQueryRaw.mockResolvedValueOnce([{ total: 3, rendered: 1, failed: 0 }]);
+    mockQueryRaw.mockResolvedValueOnce([
+      { total: 3, queued: 1, in_progress: 1, with_issues: 1, without_issues: 0, failed: 0 }
+    ]);
 
     const { handleAnalyze } = await import("../analyze");
 
@@ -104,7 +106,9 @@ describe("handleAnalyze", () => {
     };
 
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-2", rootUrl: "https://example.com", status: "PROCESSING" });
-    mockQueryRaw.mockResolvedValueOnce([{ total: 2, rendered: 2, failed: 0 }]);
+    mockQueryRaw.mockResolvedValueOnce([
+      { total: 2, queued: 0, in_progress: 0, with_issues: 2, without_issues: 0, failed: 0 }
+    ]);
     mockAiSummaryFindUnique.mockResolvedValueOnce(null);
     mockAuditRunFindUnique.mockResolvedValueOnce({
       id: "run-2",
@@ -114,7 +118,7 @@ describe("handleAnalyze", () => {
         {
           id: "page-1",
           url: "https://example.com",
-          status: "RENDERED",
+          status: "COMPLETE_WITH_ISSUES",
           htmlUrl: null,
           cssBundleUrl: null,
           screenshotUrl: null,
@@ -132,7 +136,7 @@ describe("handleAnalyze", () => {
         {
           id: "page-2",
           url: "https://example.com/about",
-          status: "RENDERED",
+          status: "COMPLETE_WITH_ISSUES",
           htmlUrl: null,
           cssBundleUrl: null,
           screenshotUrl: null,
@@ -183,7 +187,7 @@ describe("handleAnalyze", () => {
         create: expect.objectContaining({ runId: "run-2" })
       })
     );
-    expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-2", "COMPLETE");
+    expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-2", "COMPLETE_WITH_ISSUES");
     expect(mockAuditQueueAdd).not.toHaveBeenCalled();
   });
 
@@ -198,7 +202,9 @@ describe("handleAnalyze", () => {
     };
 
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-3", rootUrl: "https://example.com", status: "PROCESSING" });
-    mockQueryRaw.mockResolvedValueOnce([{ total: 2, rendered: 1, failed: 1 }]);
+    mockQueryRaw.mockResolvedValueOnce([
+      { total: 2, queued: 0, in_progress: 0, with_issues: 1, without_issues: 0, failed: 1 }
+    ]);
     mockAiSummaryFindUnique.mockResolvedValueOnce(null);
     mockAuditRunFindUnique.mockResolvedValueOnce({
       id: "run-3",
@@ -208,7 +214,7 @@ describe("handleAnalyze", () => {
         {
           id: "page-1",
           url: "https://example.com",
-          status: "RENDERED",
+          status: "COMPLETE_WITH_ISSUES",
           htmlUrl: null,
           cssBundleUrl: null,
           screenshotUrl: null,
@@ -254,12 +260,14 @@ describe("handleAnalyze", () => {
     expect(payload.page_summaries[0]).toEqual(
       expect.objectContaining({ summary: "Ingen AI-insikt kunde genereras för denna sida." })
     );
-    expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-3", "COMPLETE");
+    expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-3", "COMPLETE_WITH_ISSUES");
   });
 
   it("falls back to a static summary when the final OpenAI call fails", async () => {
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-4", rootUrl: "https://example.com", status: "PROCESSING" });
-    mockQueryRaw.mockResolvedValueOnce([{ total: 1, rendered: 1, failed: 0 }]);
+    mockQueryRaw.mockResolvedValueOnce([
+      { total: 1, queued: 0, in_progress: 0, with_issues: 1, without_issues: 0, failed: 0 }
+    ]);
     mockAiSummaryFindUnique.mockResolvedValueOnce(null);
     mockAuditRunFindUnique.mockResolvedValueOnce({
       id: "run-4",
@@ -269,7 +277,7 @@ describe("handleAnalyze", () => {
         {
           id: "page-3",
           url: "https://example.com",
-          status: "RENDERED",
+          status: "COMPLETE_WITH_ISSUES",
           htmlUrl: null,
           cssBundleUrl: null,
           screenshotUrl: null,
@@ -312,12 +320,14 @@ describe("handleAnalyze", () => {
         })
       })
     );
-    expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-4", "COMPLETE");
+    expect(mockUpdateAuditStatus).toHaveBeenCalledWith("run-4", "COMPLETE_WITH_ISSUES");
   });
 
   it("marks the run as failed when every page fails", async () => {
     mockAuditRunFindUnique.mockResolvedValueOnce({ id: "run-5", rootUrl: "https://example.com", status: "PROCESSING" });
-    mockQueryRaw.mockResolvedValueOnce([{ total: 2, rendered: 0, failed: 2 }]);
+    mockQueryRaw.mockResolvedValueOnce([
+      { total: 2, queued: 0, in_progress: 0, with_issues: 0, without_issues: 0, failed: 2 }
+    ]);
 
     const { handleAnalyze } = await import("../analyze");
 

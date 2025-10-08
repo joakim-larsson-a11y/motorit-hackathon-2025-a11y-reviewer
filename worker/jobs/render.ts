@@ -67,7 +67,7 @@ async function gotoWithRetries(page: PlaywrightPage, url: string): Promise<Playw
 }
 
 export async function handleRender({ runId, pageId, url }: RenderJobData) {
-  await markPageStatus(pageId, PageStatus.RENDERING);
+  await markPageStatus(pageId, PageStatus.IN_PROGRESS);
 
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -96,10 +96,28 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
       axeReport,
     });
 
+    const violations = Array.isArray(axeResults?.violations) ? axeResults.violations : [];
+    const issuePayloads = violations.flatMap((violation: any) => {
+      const nodes = Array.isArray(violation.nodes) ? violation.nodes : [];
+      return nodes.map((node: any) => ({
+        pageId,
+        ruleId: violation.id,
+        impact: violation.impact,
+        wcagRefs: violation.tags?.filter((tag: string) => tag.startsWith("wcag")) ?? [],
+        helpUrl: violation.helpUrl,
+        html: node.html,
+        nodes: node,
+      }));
+    });
+    const finalStatus =
+      issuePayloads.length > 0
+        ? PageStatus.COMPLETE_WITH_ISSUES
+        : PageStatus.COMPLETE_NO_ISSUES;
+
     await prisma.page.update({
       where: { id: pageId },
       data: {
-        status: PageStatus.RENDERED,
+        status: finalStatus,
         htmlUrl: keys?.html ?? null,
         cssBundleUrl: keys?.css ?? null,
         screenshotUrl: keys?.screenshot ?? null,
@@ -111,21 +129,11 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
 
     await prisma.issue.deleteMany({ where: { pageId } });
 
-    await prisma.issue.createMany({
-      data: axeResults.violations.flatMap((violation: any) =>
-        violation.nodes.map((node: any) => ({
-          pageId,
-          ruleId: violation.id,
-          impact: violation.impact,
-          wcagRefs:
-            violation.tags?.filter((tag: string) => tag.startsWith("wcag")) ??
-            [],
-          helpUrl: violation.helpUrl,
-          html: node.html,
-          nodes: node,
-        }))
-      ),
-    });
+    if (issuePayloads.length > 0) {
+      await prisma.issue.createMany({
+        data: issuePayloads,
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "unknown-error";
     await prisma.page.update({

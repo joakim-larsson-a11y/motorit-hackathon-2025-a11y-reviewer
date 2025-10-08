@@ -12,7 +12,11 @@ type Props = {
   initialAudit: SerializableAuditRun;
 };
 
-const FINAL_STATUSES = new Set(["COMPLETE", "FAILED"]);
+const FINAL_STATUSES = new Set<AuditStatus | string>([
+  "COMPLETE_WITH_ISSUES",
+  "COMPLETE_NO_ISSUES",
+  "FAILED",
+]);
 
 export function AuditDashboardClient({ initialAudit }: Props) {
   const [audit, setAudit] = useState<SerializableAuditRun>(initialAudit);
@@ -21,6 +25,8 @@ export function AuditDashboardClient({ initialAudit }: Props) {
   const [lastUpdated, setLastUpdated] = useState(() => new Date(initialAudit.updatedAt));
 
   const issueTotal = useMemo(() => audit.totalIssues, [audit.totalIssues]);
+  const pageProgress = useMemo(() => computePageProgress(audit.pages), [audit.pages]);
+  const showProgressPanel = !FINAL_STATUSES.has(audit.status) && pageProgress.total > 0;
 
   const poll = useCallback(async () => {
     try {
@@ -114,11 +120,81 @@ export function AuditDashboardClient({ initialAudit }: Props) {
             value={issueTotal.toString()}
           />
         </dl>
+        {showProgressPanel ? <ProgressPanel progress={pageProgress} /> : null}
       </section>
 
       <SummarySection summary={audit.summary} />
 
       <PageTable pages={audit.pages} runId={audit.id} />
+    </div>
+  );
+}
+
+type PageProgress = ReturnType<typeof computePageProgress>;
+
+function ProgressPanel({ progress }: { progress: PageProgress }) {
+  const completed = progress.completeWithIssues + progress.completeNoIssues;
+  const completionRate = progress.total === 0 ? 0 : Math.round((completed / progress.total) * 100);
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm dark:border-slate-800 dark:bg-slate-900/30">
+      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+            Framsteg
+          </p>
+          <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+            {completed} av {progress.total} sidor klara ({completionRate}%)
+          </p>
+        </div>
+        <div className="flex w-full max-w-md items-center gap-3">
+          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+            <div
+              className="h-full rounded-full bg-emerald-500 transition-[width]"
+              style={{ width: `${Math.min(100, completionRate)}%` }}
+            />
+          </div>
+          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+            {completionRate}%
+          </span>
+        </div>
+      </div>
+      <dl className="mt-4 grid gap-3 text-xs leading-5 text-slate-600 dark:text-slate-300 sm:grid-cols-2 lg:grid-cols-5">
+        <ProgressBadge label="Köade" value={progress.queued} tone="purple" />
+        <ProgressBadge label="Pågår" value={progress.inProgress} tone="blue" />
+        <ProgressBadge label="Klart – problem" value={progress.completeWithIssues} tone="amber" />
+        <ProgressBadge label="Klart – inga problem" value={progress.completeNoIssues} tone="emerald" />
+        <ProgressBadge label="Misslyckade" value={progress.failed} tone="rose" />
+      </dl>
+    </div>
+  );
+}
+
+function ProgressBadge({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: number;
+  tone: "purple" | "blue" | "amber" | "emerald" | "rose";
+}) {
+  const toneClasses: Record<"purple" | "blue" | "amber" | "emerald" | "rose", string> = {
+    purple: "bg-purple-500/10 text-purple-700 dark:bg-purple-500/15 dark:text-purple-200",
+    blue: "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200",
+    amber: "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
+    emerald: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200",
+    rose: "bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200",
+  };
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2 dark:border-slate-800 dark:bg-slate-900/40">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
+        {label}
+      </span>
+      <span className={`inline-flex min-w-[2.5rem] justify-center rounded-full px-2 py-1 text-sm font-semibold ${toneClasses[tone]}`}>
+        {value}
+      </span>
     </div>
   );
 }
@@ -213,6 +289,43 @@ function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: st
         </table>
       </div>
     </section>
+  );
+}
+
+function computePageProgress(pages: SerializableAuditPage[]) {
+  return pages.reduce(
+    (acc, page) => {
+      const status = page.status as PageStatus | string;
+      acc.total += 1;
+      switch (status) {
+        case "QUEUED":
+          acc.queued += 1;
+          break;
+        case "IN_PROGRESS":
+          acc.inProgress += 1;
+          break;
+        case "COMPLETE_WITH_ISSUES":
+          acc.completeWithIssues += 1;
+          break;
+        case "COMPLETE_NO_ISSUES":
+          acc.completeNoIssues += 1;
+          break;
+        case "FAILED":
+          acc.failed += 1;
+          break;
+        default:
+          break;
+      }
+      return acc;
+    },
+    {
+      total: 0,
+      queued: 0,
+      inProgress: 0,
+      completeWithIssues: 0,
+      completeNoIssues: 0,
+      failed: 0,
+    }
   );
 }
 

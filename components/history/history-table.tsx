@@ -138,7 +138,13 @@ export function sortHistoryRows(rows: HistoryRow[], sort: SortDescriptor): Histo
   });
 }
 
-const STATUS_ORDER = ["PROCESSING", "PENDING", "COMPLETE", "FAILED"] as const;
+const STATUS_ORDER = [
+  "PROCESSING",
+  "PENDING",
+  "COMPLETE_WITH_ISSUES",
+  "COMPLETE_NO_ISSUES",
+  "FAILED"
+] as const;
 
 const SORT_FUNCTIONS: Record<SortKey, (a: HistoryRow, b: HistoryRow) => number> = {
   date: (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime(),
