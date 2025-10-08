@@ -16,7 +16,7 @@ type RenderJobData = {
 const bucketName = process.env.S3_BUCKET;
 
 export async function handleRender({ runId, pageId, url }: RenderJobData) {
-  await markPageStatus(pageId, PageStatus.PROCESSING);
+  await markPageStatus(pageId, PageStatus.RENDERING);
 
   const browser = await chromium.launch();
   const page = await browser.newPage();
@@ -25,7 +25,7 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
     const start = Date.now();
     const response = await page.goto(url, {
       waitUntil: "networkidle",
-      timeout: 45_000
+      timeout: 45_000,
     });
 
     const html = await page.content();
@@ -39,18 +39,26 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
       return await window.axe.run();
     });
 
-    const keys = await uploadArtifacts({ pageId, html, cssBundle, screenshotBuffer });
+    const axeReport = JSON.stringify(axeResults, null, 2);
+    const keys = await uploadArtifacts({
+      pageId,
+      html,
+      cssBundle,
+      screenshotBuffer,
+      axeReport,
+    });
 
     await prisma.page.update({
       where: { id: pageId },
       data: {
-        status: PageStatus.COMPLETE,
+        status: PageStatus.RENDERED,
         htmlUrl: keys?.html ?? null,
         cssBundleUrl: keys?.css ?? null,
         screenshotUrl: keys?.screenshot ?? null,
+        axeReportUrl: keys?.axe ?? null,
         httpStatus: response?.status() ?? null,
-        loadTimeMs
-      }
+        loadTimeMs,
+      },
     });
 
     await prisma.issue.deleteMany({ where: { pageId } });
@@ -61,19 +69,21 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
           pageId,
           ruleId: violation.id,
           impact: violation.impact,
-          wcagRefs: violation.tags?.filter((tag: string) => tag.startsWith("wcag")) ?? [],
+          wcagRefs:
+            violation.tags?.filter((tag: string) => tag.startsWith("wcag")) ??
+            [],
           helpUrl: violation.helpUrl,
           html: node.html,
-          nodes: node
+          nodes: node,
         }))
-      )
+      ),
     });
   } catch (error) {
     await prisma.page.update({
       where: { id: pageId },
       data: {
-        status: PageStatus.FAILED
-      }
+        status: PageStatus.FAILED,
+      },
     });
     await updateAuditStatus(runId, AuditStatus.FAILED);
     throw error;
@@ -91,12 +101,14 @@ async function uploadArtifacts({
   pageId,
   html,
   cssBundle,
-  screenshotBuffer
+  screenshotBuffer,
+  axeReport,
 }: {
   pageId: string;
   html: string;
   cssBundle: string;
   screenshotBuffer: Buffer;
+  axeReport: string;
 }) {
   if (!bucketName) {
     return null;
@@ -106,36 +118,46 @@ async function uploadArtifacts({
   const htmlKey = `${prefix}/dom.html`;
   const cssKey = `${prefix}/styles.css`;
   const screenshotKey = `${prefix}/screenshot.png`;
+  const axeKey = `${prefix}/axe-report.json`;
 
   await Promise.all([
     putObject({
       bucket: bucketName,
       key: htmlKey,
       body: Buffer.from(html, "utf-8"),
-      contentType: "text/html"
+      contentType: "text/html",
     }),
     putObject({
       bucket: bucketName,
       key: cssKey,
       body: Buffer.from(cssBundle, "utf-8"),
-      contentType: "text/css"
+      contentType: "text/css",
     }),
     putObject({
       bucket: bucketName,
       key: screenshotKey,
       body: screenshotBuffer,
-      contentType: "image/png"
-    })
+      contentType: "image/png",
+    }),
+    putObject({
+      bucket: bucketName,
+      key: axeKey,
+      body: Buffer.from(axeReport, "utf-8"),
+      contentType: "application/json",
+    }),
   ]);
 
   const publicEndpoint = process.env.S3_PUBLIC_BASE_URL;
 
   const resolveUrl = (key: string) =>
-    publicEndpoint ? `${publicEndpoint.replace(/\/$/, "")}/${key}` : `s3://${bucketName}/${key}`;
+    publicEndpoint
+      ? `${publicEndpoint.replace(/\/$/, "")}/${key}`
+      : `s3://${bucketName}/${key}`;
 
   return {
     html: resolveUrl(htmlKey),
     css: resolveUrl(cssKey),
-    screenshot: resolveUrl(screenshotKey)
+    screenshot: resolveUrl(screenshotKey),
+    axe: resolveUrl(axeKey),
   };
 }

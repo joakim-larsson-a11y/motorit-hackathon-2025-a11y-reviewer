@@ -15,7 +15,11 @@ type DiscoverJobData = {
   maxPages?: number;
 };
 
-export async function handleDiscover({ runId, rootUrl, maxPages = 50 }: DiscoverJobData) {
+export async function handleDiscover({
+  runId,
+  rootUrl,
+  maxPages = 3,
+}: DiscoverJobData) {
   await updateAuditStatus(runId, AuditStatus.PROCESSING);
 
   const urls = await collectCandidateUrls(rootUrl, maxPages);
@@ -29,19 +33,20 @@ export async function handleDiscover({ runId, rootUrl, maxPages = 50 }: Discover
     data: urls.map((url) => ({
       runId,
       url,
-      status: PageStatus.QUEUED
+      status: PageStatus.QUEUED,
     })),
-    skipDuplicates: true
+    skipDuplicates: true,
   });
 
   const pages = await prisma.page.findMany({
     where: { runId },
-    orderBy: { createdAt: "asc" }
+    orderBy: { createdAt: "asc" },
   });
 
   for (const page of pages) {
     await auditQueue.add("render", { runId, pageId: page.id, url: page.url });
   }
+  console.log(`---- KLAR med renderjobb for ${pages.length} sidor ----`);
 
   // Analyssteget kan köras efter att render-jobben markerat sig som klara.
   await auditQueue.add(
@@ -51,16 +56,19 @@ export async function handleDiscover({ runId, rootUrl, maxPages = 50 }: Discover
       jobId: `analyze-${runId}`,
       removeOnComplete: true,
       removeOnFail: false,
-      delay: 5_000
     }
   );
 }
 
-export async function collectCandidateUrls(rootUrl: string, maxPages: number): Promise<string[]> {
+export async function collectCandidateUrls(
+  rootUrl: string,
+  maxPages: number
+): Promise<string[]> {
   const allowOffDomain = process.env.ALLOW_OFFDOMAIN_SITEMAPS === "true";
   const respectRobots = process.env.RESPECT_ROBOTS !== "false";
   const maxUrlsEnv = Number.parseInt(process.env.MAX_URLS ?? "", 10);
-  const maxUrls = Number.isFinite(maxUrlsEnv) && maxUrlsEnv > 0 ? maxUrlsEnv : 10_000;
+  const maxUrls =
+    Number.isFinite(maxUrlsEnv) && maxUrlsEnv > 0 ? maxUrlsEnv : 10_000;
   const limit = Math.min(maxPages, maxUrls);
 
   let entry: URL;
@@ -81,7 +89,7 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
       runUrl: entryNormalized,
       limit,
       allowOffDomain,
-      respectRobots
+      respectRobots,
     })
   );
 
@@ -90,7 +98,7 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
     console.log(
       JSON.stringify({
         event: "discover.robots_missing",
-        url: new URL("/robots.txt", origin).toString()
+        url: new URL("/robots.txt", origin).toString(),
       })
     );
   } else {
@@ -98,18 +106,22 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
       JSON.stringify({
         event: "discover.robots_loaded",
         sitemapDirectives: robotsInfo.sitemapUrls.length,
-        agentCount: robotsInfo.agents.size
+        agentCount: robotsInfo.agents.size,
       })
     );
   }
   const robotsRules = respectRobots ? getAgentRules(robotsInfo, "*") : null;
 
-  const sitemapEndpoints = buildSitemapEndpoints(origin, robotsInfo, allowOffDomain);
+  const sitemapEndpoints = buildSitemapEndpoints(
+    origin,
+    robotsInfo,
+    allowOffDomain
+  );
 
   console.log(
     JSON.stringify({
       event: "discover.sitemaps",
-      attempted: sitemapEndpoints.map((endpoint) => endpoint.url)
+      attempted: sitemapEndpoints.map((endpoint) => endpoint.url),
     })
   );
 
@@ -118,7 +130,35 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
   const visited = new Set<string>();
   let hadSuccessfulSitemap = false;
 
+  let reachedLimit = limit <= 0;
+
+  const hasCapacity = () => !reachedLimit;
+  const recordUrl = (candidate: string) => {
+    if (!candidate || reachedLimit) {
+      return false;
+    }
+
+    if (discovered.has(candidate)) {
+      return !reachedLimit;
+    }
+
+    discovered.add(candidate);
+    if (discovered.size >= limit) {
+      reachedLimit = true;
+    }
+
+    return !reachedLimit;
+  };
+
+  if (entryNormalized) {
+    recordUrl(entryNormalized);
+  }
+
   for (const endpoint of sitemapEndpoints) {
+    if (!hasCapacity()) {
+      break;
+    }
+
     await traverseSitemap(
       endpoint.url,
       endpoint.source,
@@ -132,12 +172,16 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
       reports,
       () => {
         hadSuccessfulSitemap = true;
+      },
+      {
+        recordUrl,
+        hasCapacity,
       }
     );
-  }
 
-  if (entryNormalized) {
-    discovered.add(entryNormalized);
+    if (!hasCapacity()) {
+      break;
+    }
   }
 
   let urls = Array.from(discovered);
@@ -150,7 +194,7 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
         JSON.stringify({
           event: "discover.robots_filtered",
           before,
-          after: urls.length
+          after: urls.length,
         })
       );
     }
@@ -161,7 +205,7 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
       JSON.stringify({
         event: "discover.fallback",
         reason: "no-urls",
-        url: entryNormalized
+        url: entryNormalized,
       })
     );
     return [entryNormalized];
@@ -183,7 +227,7 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
         event: "discover.truncate",
         before: sorted.length,
         after: truncated.length,
-        limit
+        limit,
       })
     );
   }
@@ -194,7 +238,7 @@ export async function collectCandidateUrls(rootUrl: string, maxPages: number): P
       discoveredCount: discovered.size,
       finalCount: truncated.length,
       reports,
-      fallbackUsed: !hadSuccessfulSitemap
+      fallbackUsed: !hadSuccessfulSitemap,
     })
   );
 
@@ -236,7 +280,10 @@ function buildSitemapEndpoints(
     }
   }
 
-  return Array.from(endpoints.entries()).map(([url, source]) => ({ url, source }));
+  return Array.from(endpoints.entries()).map(([url, source]) => ({
+    url,
+    source,
+  }));
 }
 
 const MAX_SITEMAP_DEPTH = 2;
@@ -252,8 +299,26 @@ async function traverseSitemap(
   visited: Set<string>,
   output: Set<string>,
   reports: SitemapTelemetry[],
-  onSuccess: () => void
+  onSuccess: () => void,
+  controls?: {
+    recordUrl: (url: string) => boolean;
+    hasCapacity: () => boolean;
+  }
 ) {
+  const recordUrl =
+    controls?.recordUrl ??
+    ((candidate: string) => {
+      if (candidate) {
+        output.add(candidate);
+      }
+      return true;
+    });
+  const hasCapacity = controls?.hasCapacity ?? (() => true);
+
+  if (!hasCapacity()) {
+    return;
+  }
+
   const normalized = normalizeUrl(sitemapUrl, origin);
   if (!normalized || visited.has(normalized)) {
     return;
@@ -270,7 +335,7 @@ async function traverseSitemap(
       JSON.stringify({
         event: "discover.sitemap_error",
         url: normalized,
-        message: error instanceof Error ? error.message : "unknown-error"
+        message: error instanceof Error ? error.message : "unknown-error",
       })
     );
     return;
@@ -280,7 +345,7 @@ async function traverseSitemap(
     console.log(
       JSON.stringify({
         event: "discover.sitemap_unavailable",
-        url: normalized
+        url: normalized,
       })
     );
     return;
@@ -291,6 +356,10 @@ async function traverseSitemap(
   if (parsed.type === "urlset") {
     const urls: string[] = [];
     for (const rawUrl of parsed.entries) {
+      if (!hasCapacity()) {
+        break;
+      }
+
       const candidate = normalizeUrl(rawUrl, origin);
       if (!candidate) {
         continue;
@@ -298,15 +367,20 @@ async function traverseSitemap(
       if (!allowOffDomain && !isSameOrigin(candidate, origin)) {
         continue;
       }
+
+      const canContinue = recordUrl(candidate);
       urls.push(candidate);
-      output.add(candidate);
+
+      if (!canContinue) {
+        break;
+      }
     }
 
     reports.push({
       url: normalized,
       source,
       type: parsed.type,
-      count: urls.length
+      count: urls.length,
     });
     return;
   }
@@ -329,7 +403,7 @@ async function traverseSitemap(
     url: normalized,
     source,
     type: parsed.type,
-    count: children.length
+    count: children.length,
   });
 
   if (depth >= MAX_SITEMAP_DEPTH) {
@@ -337,6 +411,9 @@ async function traverseSitemap(
   }
 
   for (const child of children) {
+    if (!hasCapacity()) {
+      break;
+    }
     await traverseSitemap(
       child,
       "index",
@@ -348,7 +425,8 @@ async function traverseSitemap(
       visited,
       output,
       reports,
-      onSuccess
+      onSuccess,
+      controls
     );
   }
 }

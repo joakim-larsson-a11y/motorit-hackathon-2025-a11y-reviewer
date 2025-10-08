@@ -22,10 +22,10 @@ export default function HomePage() {
           presenterar dem i ett interaktivt dashboard.
         </p>
       </header>
-      <HistorySection />
       <section className="max-w-xl rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-xl dark:border-slate-800 dark:bg-slate-900/60">
         <AuditLauncher />
       </section>
+      <HistorySection />
       <section className="grid gap-6 md:grid-cols-3">
         {FEATURES.map(({ title, description }) => (
           <article

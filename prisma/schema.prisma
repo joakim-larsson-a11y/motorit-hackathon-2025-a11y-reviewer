@@ -16,8 +16,8 @@ enum AuditStatus {
 
 enum PageStatus {
   QUEUED
-  PROCESSING
-  COMPLETE
+  RENDERING
+  RENDERED
   FAILED
 }
 
@@ -40,8 +40,10 @@ model Page {
   htmlUrl        String?
   cssBundleUrl   String?
   screenshotUrl  String?
+  axeReportUrl   String?
   loadTimeMs     Int?
   httpStatus     Int?
+  aiInsights     Json?
   createdAt      DateTime   @default(now())
   updatedAt      DateTime   @updatedAt
 

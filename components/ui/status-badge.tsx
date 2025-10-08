@@ -11,6 +11,10 @@ const STATUS_STYLES: Record<SupportedStatus, string> = {
   FAILED: "bg-rose-500/10 text-rose-700 dark:bg-rose-500/20 dark:text-rose-200",
   QUEUED:
     "bg-purple-500/10 text-purple-700 dark:bg-purple-500/20 dark:text-purple-200",
+  RENDERING:
+    "bg-blue-500/10 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200",
+  RENDERED:
+    "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-200",
 };
 
 const STATUS_LABELS: Record<SupportedStatus, string> = {
@@ -18,7 +22,9 @@ const STATUS_LABELS: Record<SupportedStatus, string> = {
   PROCESSING: "Bearbetar",
   COMPLETE: "Klar",
   FAILED: "Misslyckades",
-  QUEUED: "Köad"
+  QUEUED: "Köad",
+  RENDERING: "Renderar",
+  RENDERED: "Renderad",
 };
 
 export function StatusBadge({ status }: { status: SupportedStatus }) {
