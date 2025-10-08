@@ -45,6 +45,9 @@ Kopiera `.env.example` till `.env.local` och fyll i:
 - `ALLOW_OFFDOMAIN_SITEMAPS` – `true` tillåter sitemaps på andra domäner.
 - `RESPECT_ROBOTS` – `false` ignorerar `User-agent: *`-regler i robots.txt.
 - `MAX_URLS` – Högsta antal sidor discovery returnerar (standard 10 000).
+- `RENDER_NAVIGATION_TIMEOUT_MS` – Timeout per sidladdning (ms, standard 45 000).
+- `RENDER_NAVIGATION_ATTEMPTS` – Antal navigatorförsök innan sidan markeras som misslyckad (standard 2).
+- `RENDER_NAVIGATION_BACKOFF_MS` – Basfördröjning mellan navigatorförsök (ms, standard 5 000).
 
 ## Kodstruktur
 ```

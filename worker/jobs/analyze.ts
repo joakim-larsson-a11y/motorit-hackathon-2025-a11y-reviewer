@@ -129,6 +129,9 @@ const ANALYZE_INCLUDE = {
 
 type AuditWithRelations = Prisma.AuditRunGetPayload<{ include: typeof ANALYZE_INCLUDE }>;
 
+const FALLBACK_OVERVIEW =
+  "Kunde inte generera AI-sammanfattning. Visar enkel rapport baserad på rådata.";
+
 export async function handleAnalyze({ runId }: AnalyzeJobData) {
   const auditMeta = await prisma.auditRun.findUnique({
     where: { id: runId },
@@ -168,7 +171,34 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     return;
   }
 
-  if (progress.failed > 0) {
+  const processedCount = progress.rendered + progress.failed;
+
+  if (processedCount < progress.total) {
+    console.log(
+      "[analyze] waiting_for_pages",
+      JSON.stringify({
+        event: "analyze.waiting_for_pages",
+        runId,
+        total: progress.total,
+        rendered: progress.rendered,
+        failed: progress.failed,
+      })
+    );
+    const requeueId = `analyze-${runId}-${Date.now()}`;
+    await auditQueue.add(
+      "analyze",
+      { runId },
+      {
+        jobId: requeueId,
+        delay: 5_000,
+        removeOnComplete: true,
+        removeOnFail: false,
+      }
+    );
+    return;
+  }
+
+  if (progress.rendered === 0 && progress.failed > 0) {
     console.log(
       "[analyze] pages_failed",
       JSON.stringify({
@@ -183,42 +213,17 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     return;
   }
 
-  if (progress.rendered < progress.total) {
-    console.log(
-      "[analyze] waiting_for_pages",
+  if (progress.failed > 0) {
+    console.warn(
+      "[analyze] partial_pages",
       JSON.stringify({
-        event: "analyze.waiting_for_pages",
+        event: "analyze.partial_pages",
         runId,
         total: progress.total,
         rendered: progress.rendered,
+        failed: progress.failed,
       })
     );
-    try {
-      await auditQueue.add(
-        "analyze",
-        { runId },
-        {
-          jobId: `analyze-${runId}`,
-          delay: 5_000,
-          removeOnComplete: true,
-          removeOnFail: false,
-        }
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "unknown-error";
-      if (!(error instanceof Error) || !message.toLowerCase().includes("already exists")) {
-        throw error;
-      }
-      console.log(
-        "[analyze] requeue_already_scheduled",
-        JSON.stringify({
-          event: "analyze.requeue_skipped",
-          runId,
-          reason: message,
-        })
-      );
-    }
-    return;
   }
 
   const existingSummary = await prisma.aiSummary.findUnique({
@@ -254,31 +259,80 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
     renderedPages,
   });
 
-  const response = await openai.responses.parse({
-    model: "gpt-4o-mini",
-    input: [
-      {
-        role: "system",
-        content:
-          "Du är en assistent som agerar som tillgänglighetsexpert. Analysera inkommande data och svara alltid på svenska."
-      },
-      {
-        role: "user",
-        content: payload
-      }
-    ],
-    text: {
-      format: zodTextFormat(AccessibilityAuditSummarySchema, "summary"),
-    }
-  });
+  let parsedSummary: AccessibilityAuditSummary | null = null;
 
-  const structured = response.output_parsed
-    ? normalizeSummary(response.output_parsed, audit)
-    : buildFallbackSummary(audit);
+  try {
+    const response = await openai.responses.parse({
+      model: "gpt-4o-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "Du är en assistent som agerar som tillgänglighetsexpert. Analysera inkommande data och svara alltid på svenska."
+        },
+        {
+          role: "user",
+          content: payload
+        }
+      ],
+      text: {
+        format: zodTextFormat(AccessibilityAuditSummarySchema, "summary"),
+      }
+    });
+    parsedSummary = response.output_parsed ?? null;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown-error";
+    console.error(
+      "[analyze] openai_error",
+      JSON.stringify({
+        event: "analyze.openai_error",
+        runId,
+        message
+      })
+    );
+  }
+
+  const structured = parsedSummary
+    ? normalizeSummary(parsedSummary, audit)
+    : buildFallbackSummary(audit, FALLBACK_OVERVIEW);
+
+  if (!parsedSummary) {
+    console.log(
+      "[analyze] fallback_summary",
+      JSON.stringify({
+        event: "analyze.fallback_summary",
+        runId
+      })
+    );
+  }
+
+  if (progress.failed > 0) {
+    structured.follow_up_actions = [
+      `Kunde inte rendera ${progress.failed} av ${progress.total} sidor. Kontrollera dessa manuellt.`,
+      ...structured.follow_up_actions,
+    ];
+  }
 
   const pageInsightsByUrl = new Map(
     structured.page_summaries.map((summary) => [summary.url, summary])
   );
+
+  if (renderedPages.length > 0) {
+    for (const page of renderedPages) {
+      if (!pageInsightsByUrl.has(page.url)) {
+        const placeholder = {
+          url: page.url,
+          severity: "moderate" as SummarySeverity,
+          summary: "Ingen AI-insikt kunde genereras för denna sida.",
+          top_rules: [],
+          recommendations: [],
+          wcag_refs: [],
+        };
+        structured.page_summaries.push(placeholder);
+        pageInsightsByUrl.set(page.url, placeholder);
+      }
+    }
+  }
 
   await prisma.$transaction(async (tx) => {
     await tx.aiSummary.upsert({
@@ -434,9 +488,9 @@ function normalizeSummary(summary: AccessibilityAuditSummary, audit: AuditWithRe
   } satisfies NormalizedSummary;
 }
 
-function buildFallbackSummary(audit: AuditWithRelations): NormalizedSummary {
+function buildFallbackSummary(audit: AuditWithRelations, overrideOverview?: string): NormalizedSummary {
   return {
-    overview: "Analysen kunde inte genereras.",
+    overview: overrideOverview ?? FALLBACK_OVERVIEW,
     quick_wins: [],
     grouped_findings: [],
     metrics: {

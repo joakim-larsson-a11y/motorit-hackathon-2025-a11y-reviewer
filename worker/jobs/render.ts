@@ -1,11 +1,11 @@
-import { AuditStatus, PageStatus } from "@prisma/client";
+import { PageStatus } from "@prisma/client";
 import { chromium } from "playwright";
-import type { Page as PlaywrightPage } from "playwright";
+import type { Page as PlaywrightPage, Response as PlaywrightResponse } from "playwright";
 
 import { axeSource } from "../../lib/axe";
 import { prisma } from "../../lib/db";
 import { putObject } from "../../lib/s3";
-import { markPageStatus, updateAuditStatus } from "../../lib/services/audit-service";
+import { markPageStatus } from "../../lib/services/audit-service";
 
 type RenderJobData = {
   runId: string;
@@ -15,6 +15,57 @@ type RenderJobData = {
 
 const bucketName = process.env.S3_BUCKET;
 
+const parseIntegerEnv = (value: string | undefined): number | null => {
+  if (value === undefined) {
+    return null;
+  }
+  const trimmed = value.trim();
+  if (trimmed === "") {
+    return null;
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const NAVIGATION_TIMEOUT_MS = parseIntegerEnv(process.env.RENDER_NAVIGATION_TIMEOUT_MS) ?? 45_000;
+const NAVIGATION_ATTEMPTS = Math.max(1, parseIntegerEnv(process.env.RENDER_NAVIGATION_ATTEMPTS) ?? 2);
+const NAVIGATION_BACKOFF_MS = Math.max(0, parseIntegerEnv(process.env.RENDER_NAVIGATION_BACKOFF_MS) ?? 5_000);
+
+async function gotoWithRetries(page: PlaywrightPage, url: string): Promise<PlaywrightResponse | null> {
+  let lastError: unknown;
+
+  for (let attempt = 1; attempt <= NAVIGATION_ATTEMPTS; attempt += 1) {
+    try {
+      return await page.goto(url, {
+        waitUntil: "networkidle",
+        timeout: NAVIGATION_TIMEOUT_MS
+      });
+    } catch (error) {
+      lastError = error;
+      const message = error instanceof Error ? error.message : "unknown-error";
+
+      console.warn(
+        "[render] navigation_retry",
+        JSON.stringify({
+          event: "render.navigation_retry",
+          url,
+          attempt,
+          attempts: NAVIGATION_ATTEMPTS,
+          message
+        })
+      );
+
+      if (attempt < NAVIGATION_ATTEMPTS && NAVIGATION_BACKOFF_MS > 0) {
+        await page.waitForTimeout(NAVIGATION_BACKOFF_MS * attempt);
+      }
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`Failed to navigate to ${url} after ${NAVIGATION_ATTEMPTS} attempts.`);
+}
+
 export async function handleRender({ runId, pageId, url }: RenderJobData) {
   await markPageStatus(pageId, PageStatus.RENDERING);
 
@@ -23,10 +74,7 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
 
   try {
     const start = Date.now();
-    const response = await page.goto(url, {
-      waitUntil: "networkidle",
-      timeout: 45_000,
-    });
+    const response = await gotoWithRetries(page, url);
 
     const html = await page.content();
     const screenshotBuffer = await page.screenshot({ fullPage: true });
@@ -79,14 +127,27 @@ export async function handleRender({ runId, pageId, url }: RenderJobData) {
       ),
     });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "unknown-error";
     await prisma.page.update({
       where: { id: pageId },
       data: {
         status: PageStatus.FAILED,
+        httpStatus: null,
+        loadTimeMs: null,
       },
     });
-    await updateAuditStatus(runId, AuditStatus.FAILED);
-    throw error;
+
+    console.error(
+      "[render] failed",
+      JSON.stringify({
+        event: "render.failed",
+        runId,
+        pageId,
+        url,
+        message,
+      })
+    );
+    return;
   } finally {
     await browser.close();
   }
