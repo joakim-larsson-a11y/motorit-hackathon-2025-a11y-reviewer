@@ -80,7 +80,11 @@ describe("handleAnalyze", () => {
       overview: "All set",
       quick_wins: [],
       grouped_findings: [],
-      metrics: { total_pages: 2, total_issues: 2, issues_by_severity: { serious: 2 } },
+      metrics: {
+        total_pages: 2,
+        total_issues: 2,
+        issues_by_severity: [{ severity: "serious", count: 2 }]
+      },
       follow_up_actions: [],
       page_classifications: [
         {
@@ -150,7 +154,7 @@ describe("handleAnalyze", () => {
       overview: "Partial",
       quick_wins: [],
       grouped_findings: [],
-      metrics: { total_pages: 1, total_issues: 1, issues_by_severity: {} },
+      metrics: { total_pages: 1, total_issues: 1, issues_by_severity: [] },
       follow_up_actions: [],
       page_classifications: []
     };

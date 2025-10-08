@@ -46,12 +46,19 @@ const AccessibilityAuditSummarySchema = z.object({
     .object({
       total_pages: z.number().int().nonnegative(),
       total_issues: z.number().int().nonnegative(),
-      issues_by_severity: z.record(z.number().int().nonnegative()).default({}),
+      issues_by_severity: z
+        .array(
+          z.object({
+            severity: z.string(),
+            count: z.number().int().nonnegative()
+          })
+        )
+        .default([]),
     })
     .default({
       total_pages: 0,
       total_issues: 0,
-      issues_by_severity: {},
+      issues_by_severity: [],
     }),
   follow_up_actions: z.array(z.string()).default([]),
   page_classifications: z
@@ -64,9 +71,9 @@ const AccessibilityAuditSummarySchema = z.object({
           .array(
             z.object({
               rule_id: z.string(),
-              description: z.string().optional(),
+              description: z.string().nullable().optional(),
               wcag_refs: z.array(z.string()).default([]),
-              count: z.number().int().nonnegative().optional(),
+              count: z.number().int().nonnegative().nullable().optional(),
             })
           )
           .default([]),
@@ -111,9 +118,9 @@ type NormalizedSummary = {
     summary: string;
     top_rules: Array<{
       rule_id: string;
-      description?: string;
+      description?: string | null;
       wcag_refs: string[];
-      count?: number;
+      count?: number | null;
     }>;
     recommendations: string[];
   }>;
@@ -440,8 +447,15 @@ function normalizeSummary(summary: AccessibilityAuditSummary, audit: AuditWithRe
   const metrics = summary.metrics ?? {
     total_pages: audit.pages.length,
     total_issues: audit.pages.reduce<number>((sum, page) => sum + page.issues.length, 0),
-    issues_by_severity: {}
+    issues_by_severity: []
   };
+
+  const issuesBySeverityRecord = Array.isArray(metrics.issues_by_severity)
+    ? metrics.issues_by_severity.reduce<Record<string, number>>((acc, item) => {
+        acc[item.severity] = item.count;
+        return acc;
+      }, {})
+    : {};
 
   return {
     overview: summary.overview,
@@ -468,7 +482,7 @@ function normalizeSummary(summary: AccessibilityAuditSummary, audit: AuditWithRe
     metrics: {
       total_pages: metrics.total_pages,
       total_issues: metrics.total_issues,
-      issues_by_severity: metrics.issues_by_severity ?? {},
+      issues_by_severity: issuesBySeverityRecord,
     },
     follow_up_actions: summary.follow_up_actions ?? [],
     page_summaries:
@@ -479,9 +493,9 @@ function normalizeSummary(summary: AccessibilityAuditSummary, audit: AuditWithRe
         top_rules:
           classification.top_rules?.map((rule) => ({
             rule_id: rule.rule_id,
-            description: rule.description,
+            description: rule.description ?? null,
             wcag_refs: rule.wcag_refs ?? [],
-            count: rule.count,
+            count: rule.count ?? null,
           })) ?? [],
         recommendations: classification.recommendations ?? [],
       })) ?? [],

@@ -17,9 +17,9 @@ type PageInsight = {
   recommendations?: string[];
   top_rules?: Array<{
     rule_id: string;
-    description?: string;
+    description?: string | null;
     wcag_refs?: string[];
-    count?: number;
+    count?: number | null;
   }>;
 };
 
