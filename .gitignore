@@ -1,0 +1,33 @@
+# dependencies
+/node_modules
+/.pnp
+.pnp.js
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+/app/.next/
+
+# production
+/build
+
+# misc
+.DS_Store
+*.log
+*.local
+.env.local
+.env.development.local
+.env.production.local
+.env.test.local
+.env
+
+# prisma
+/prisma/migrations
+
+# playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/

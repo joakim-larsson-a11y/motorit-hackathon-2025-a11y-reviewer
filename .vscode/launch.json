@@ -1,0 +1,36 @@
+
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Worker (pnpm run worker)",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["run", "-s", "worker"],
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKER_CONCURRENCY": "1"
+      },
+      "console": "integratedTerminal",
+      "autoAttachChildProcesses": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node",
+      "request": "launch",
+      "name": "Worker (node --loader tsx)",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["--loader", "tsx", "--enable-source-maps"],
+      "program": "${workspaceFolder}/worker/index.ts",
+      "cwd": "${workspaceFolder}",
+      "envFile": "${workspaceFolder}/.env",
+      "env": {
+        "WORKER_CONCURRENCY": "1"
+      },
+      "console": "integratedTerminal",
+      "skipFiles": ["<node_internals>/**"]
+    }
+  ]
+}

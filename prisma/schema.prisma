@@ -1,0 +1,81 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum AuditStatus {
+  PENDING
+  PROCESSING
+  COMPLETE
+  FAILED
+}
+
+enum PageStatus {
+  QUEUED
+  PROCESSING
+  COMPLETE
+  FAILED
+}
+
+model AuditRun {
+  id        String      @id @default(uuid())
+  rootUrl   String
+  status    AuditStatus @default(PENDING)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  pages   Page[]
+  summary AiSummary?
+}
+
+model Page {
+  id             String     @id @default(uuid())
+  runId          String
+  url            String
+  status         PageStatus @default(QUEUED)
+  htmlUrl        String?
+  cssBundleUrl   String?
+  screenshotUrl  String?
+  loadTimeMs     Int?
+  httpStatus     Int?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  auditRun AuditRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+  issues   Issue[]
+
+  @@index([runId])
+  @@unique([runId, url])
+}
+
+model Issue {
+  id        String   @id @default(uuid())
+  pageId    String
+  ruleId    String
+  impact    String?
+  wcagRefs  String[]
+  helpUrl   String?
+  html      String?
+  nodes     Json
+  createdAt DateTime @default(now())
+
+  page Page @relation(fields: [pageId], references: [id], onDelete: Cascade)
+
+  @@index([pageId])
+  @@index([ruleId])
+}
+
+model AiSummary {
+  id        String   @id @default(uuid())
+  runId     String   @unique
+  text      String
+  payload   Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditRun AuditRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+}
