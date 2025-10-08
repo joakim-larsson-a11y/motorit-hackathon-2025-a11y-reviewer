@@ -85,8 +85,15 @@ export function AuditDashboardClient({ initialAudit }: Props) {
               </span>
             </p>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-              Uppdaterad {lastUpdated.toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-              {isPolling && !FINAL_STATUSES.has(audit.status) ? " • Uppdaterar var 5:e sekund" : ""}
+              Uppdaterad{" "}
+              {lastUpdated.toLocaleTimeString("sv-SE", {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+              {isPolling && !FINAL_STATUSES.has(audit.status)
+                ? " • Uppdaterar var 5:e sekund"
+                : ""}
             </p>
             {error ? (
               <p className="mt-2 text-xs text-rose-500 dark:text-rose-300">
@@ -96,13 +103,15 @@ export function AuditDashboardClient({ initialAudit }: Props) {
           </div>
           <StatusBadge status={audit.status as AuditStatus} />
         </div>
-        <dl className="grid gap-4 md:grid-cols-4">
-          <SummaryTile label="Skapad" value={new Date(audit.createdAt).toLocaleString("sv-SE")} />
-          <SummaryTile label="Sidor" value={audit.pages.length.toString()} />
-          <SummaryTile label="Total antal issues" value={issueTotal.toString()} />
+        <dl className="grid gap-4 md:grid-cols-3">
           <SummaryTile
-            label="AI-sammanfattning"
-            value={audit.summary ? "Tillgänglig" : FINAL_STATUSES.has(audit.status) ? "Kunde inte genereras" : "Bearbetas"}
+            label="Skapad"
+            value={new Date(audit.createdAt).toLocaleString("sv-SE")}
+          />
+          <SummaryTile label="Sidor" value={audit.pages.length.toString()} />
+          <SummaryTile
+            label="Total antal issues"
+            value={issueTotal.toString()}
           />
         </dl>
       </section>

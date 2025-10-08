@@ -18,7 +18,7 @@ type DiscoverJobData = {
 export async function handleDiscover({
   runId,
   rootUrl,
-  maxPages = 3,
+  maxPages = parseInt(process.env.DEFAULT_MAX_PAGES || "5", 10),
 }: DiscoverJobData) {
   await updateAuditStatus(runId, AuditStatus.PROCESSING);
 
