@@ -59,6 +59,7 @@ function HistorySection() {
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [archivingIds, setArchivingIds] = useState<Set<string>>(() => new Set());
   const pageRef = useRef(0);
 
   const loadPage = useCallback(
@@ -138,6 +139,37 @@ function HistorySection() {
     void loadPage(pageRef.current + 1);
   }, [loadPage]);
 
+  const handleArchive = useCallback(async (id: string) => {
+    setError(null);
+    setArchivingIds((current) => {
+      const next = new Set(current);
+      next.add(id);
+      return next;
+    });
+
+    try {
+      const response = await fetch(`/api/audits/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived: true })
+      });
+
+      if (!response.ok) {
+        throw new Error("Could not archive audit.");
+      }
+
+      setRows((previous) => previous.filter((row) => row.id !== id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not archive audit.");
+    } finally {
+      setArchivingIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+    }
+  }, []);
+
   return (
     <section className="space-y-4">
       <div>
@@ -165,6 +197,8 @@ function HistorySection() {
           hasMore={hasMore}
           onShowMore={handleShowMore}
           isLoadingMore={isLoadingMore}
+          onArchive={handleArchive}
+          archivingIds={archivingIds}
         />
       )}
     </section>

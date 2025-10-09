@@ -27,6 +27,7 @@ model AuditRun {
   id        String      @id @default(uuid())
   rootUrl   String
   status    AuditStatus @default(PENDING)
+  archived  Boolean     @default(false)
   createdAt DateTime    @default(now())
   updatedAt DateTime    @updatedAt
 

@@ -46,3 +46,10 @@ export async function markPageStatus(pageId: string, status: PageStatus) {
     data: { status }
   });
 }
+
+export async function setAuditArchived(runId: string, archived: boolean) {
+  return prisma.auditRun.update({
+    where: { id: runId },
+    data: { archived }
+  });
+}

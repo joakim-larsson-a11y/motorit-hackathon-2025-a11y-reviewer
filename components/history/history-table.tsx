@@ -29,14 +29,24 @@ type HistoryTableProps = {
   hasMore: boolean;
   onShowMore: () => void;
   isLoadingMore: boolean;
+  onArchive: (id: string) => void;
+  archivingIds: ReadonlySet<string>;
 };
 
-const COLUMN_DEFINITIONS: { key: SortKey; label: string; align?: "right" }[] = [
-  { key: "date", label: "Date" },
-  { key: "page", label: "Page reviewed" },
-  { key: "status", label: "Status" },
-  { key: "link", label: "Link to audit" },
-  { key: "errors", label: "Total errors found", align: "right" }
+type ColumnDefinition = {
+  key: string;
+  label: string;
+  align?: "right";
+  sortKey?: SortKey;
+};
+
+const COLUMN_DEFINITIONS: ColumnDefinition[] = [
+  { key: "date", label: "Date", sortKey: "date" },
+  { key: "page", label: "Page reviewed", sortKey: "page" },
+  { key: "status", label: "Status", sortKey: "status" },
+  { key: "link", label: "Link to audit", sortKey: "link" },
+  { key: "errors", label: "Total errors found", align: "right", sortKey: "errors" },
+  { key: "actions", label: "Actions", align: "right" }
 ];
 
 export function HistoryTable({
@@ -45,7 +55,9 @@ export function HistoryTable({
   onSort,
   hasMore,
   onShowMore,
-  isLoadingMore
+  isLoadingMore,
+  onArchive,
+  archivingIds
 }: HistoryTableProps) {
   const sortedRows = useMemo(() => sortHistoryRows(rows, sort), [rows, sort]);
 
@@ -56,22 +68,30 @@ export function HistoryTable({
           <thead className="bg-slate-50 dark:bg-slate-900/70">
             <tr>
               {COLUMN_DEFINITIONS.map((column) => {
-                const isActive = sort.column === column.key;
-                const ariaSort = isActive ? sort.direction : "none";
+                const isSortable = column.sortKey != null;
+                const isActive = isSortable && sort.column === column.sortKey;
+                const ariaSort = isSortable ? (isActive ? sort.direction : "none") : undefined;
+                const className = `px-4 py-3 font-semibold text-slate-700 dark:text-slate-200 ${
+                  column.align === "right" ? "text-right" : ""
+                }`;
+
+                if (!isSortable) {
+                  return (
+                    <th key={column.key} scope="col" className={className}>
+                      <span>{column.label}</span>
+                    </th>
+                  );
+                }
+
                 return (
-                  <th
-                    key={column.key}
-                    scope="col"
-                    className={`px-4 py-3 font-semibold text-slate-700 dark:text-slate-200 ${column.align === "right" ? "text-right" : ""}`}
-                    aria-sort={ariaSort}
-                  >
+                  <th key={column.key} scope="col" className={className} aria-sort={ariaSort}>
                     <button
                       type="button"
-                      onClick={() => onSort(column.key)}
+                      onClick={() => onSort(column.sortKey!)}
                       className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-sm font-medium text-slate-700 outline-none transition hover:bg-slate-200/70 focus-visible:ring-2 focus-visible:ring-brand dark:text-slate-200 dark:hover:bg-slate-700/60"
                     >
                       {column.label}
-                      <SortIndicator active={isActive} direction={sort.direction} />
+                      <SortIndicator active={Boolean(isActive)} direction={sort.direction} />
                     </button>
                   </th>
                 );
@@ -82,6 +102,7 @@ export function HistoryTable({
             {sortedRows.map((row) => {
               const displayUrl = getDisplayUrl(row.rootUrl);
               const formattedDate = formatLocalDateTime(row.createdAt);
+              const isArchiving = archivingIds.has(row.id);
 
               return (
                 <tr key={row.id} className="odd:bg-white even:bg-slate-50 dark:odd:bg-slate-900/40 dark:even:bg-slate-900/20">
@@ -102,6 +123,17 @@ export function HistoryTable({
                   </td>
                   <td className="px-4 py-3 text-right font-semibold text-slate-900 dark:text-slate-100">
                     {row.issueTotal}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => onArchive(row.id)}
+                      disabled={isArchiving}
+                      className="inline-flex items-center rounded-md border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 transition hover:border-slate-400 hover:text-slate-900 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-500 dark:hover:text-white dark:disabled:border-slate-800 dark:disabled:text-slate-500"
+                      aria-label={`Archive audit for ${displayUrl}`}
+                    >
+                      {isArchiving ? "Archiving…" : "Archive"}
+                    </button>
                   </td>
                 </tr>
               );

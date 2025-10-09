@@ -63,6 +63,7 @@ export async function GET(request: NextRequest) {
   const limit = Math.min(limitParam, 100);
 
   const runs = await prisma.auditRun.findMany({
+    where: { archived: false },
     orderBy: { createdAt: "desc" },
     skip: offset,
     take: limit + 1

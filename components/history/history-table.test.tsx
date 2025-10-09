@@ -32,6 +32,8 @@ describe("HistoryTable", () => {
         hasMore={false}
         onShowMore={vi.fn()}
         isLoadingMore={false}
+        onArchive={vi.fn()}
+        archivingIds={new Set<string>()}
       />
     );
 
@@ -58,6 +60,7 @@ describe("HistoryTable", () => {
           "Status",
           "Link to audit",
           "Total errors found",
+          "Actions",
         ],
         "rows": [
           [
@@ -66,6 +69,7 @@ describe("HistoryTable", () => {
             "Klar med problem",
             "View audit for example.com/a",
             "5",
+            "Archive",
           ],
           [
             "2024-01-03 12:00",
@@ -73,6 +77,7 @@ describe("HistoryTable", () => {
             "Misslyckades",
             "View audit for example.com/b",
             "2",
+            "Archive",
           ],
         ],
       }
@@ -88,6 +93,8 @@ describe("HistoryTable", () => {
         hasMore={true}
         onShowMore={vi.fn()}
         isLoadingMore={false}
+        onArchive={vi.fn()}
+        archivingIds={new Set<string>()}
       />
     );
 
@@ -102,6 +109,9 @@ describe("HistoryTable", () => {
     for (const link of links) {
       expect(link).toHaveAccessibleName(/^View audit for /);
     }
+
+    const archiveButtons = screen.getAllByRole("button", { name: /^Archive audit for/ });
+    expect(archiveButtons).toHaveLength(sampleRows.length);
   });
 });
 
