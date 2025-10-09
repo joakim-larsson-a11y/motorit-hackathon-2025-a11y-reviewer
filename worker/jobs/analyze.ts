@@ -438,64 +438,88 @@ async function generatePageInsights(
   renderedPages: AuditWithRelations["pages"]
 ): Promise<NormalizedPageInsight[]> {
   const insights: NormalizedPageInsight[] = [];
+  const concurrency = Math.max(
+    1,
+    Number.parseInt(process.env.ANALYZE_PAGE_CONCURRENCY ?? "", 10) || 3
+  );
+  const workerCount = Math.min(concurrency, renderedPages.length || 1);
+  let cursor = 0;
 
-  for (const page of renderedPages) {
-    const existing = parseStoredPageInsight(page.aiInsights);
-    if (existing) {
-      insights.push(existing);
-      continue;
+  const takeNext = () => {
+    if (cursor >= renderedPages.length) {
+      return null;
     }
+    const page = renderedPages[cursor];
+    cursor += 1;
+    return page;
+  };
 
-    const prompt = buildPageInsightPrompt(page, audit);
-    let parsed: PageInsight | null = null;
-    try {
-      const response = await openai.responses.parse({
-        model: "gpt-4o-mini",
-        input: [
-          {
-            role: "system",
-            content:
-              "Du analyserar tillgänglighetsproblem för en enskild webbsida. Svara alltid på svenska och håll dig kortfattad men handlingsorienterad."
-          },
-          {
-            role: "user",
-            content: prompt
+  const runWorker = async () => {
+    while (true) {
+      const page = takeNext();
+      if (!page) {
+        break;
+      }
+
+      const existing = parseStoredPageInsight(page.aiInsights);
+      if (existing) {
+        insights.push(existing);
+        continue;
+      }
+
+      const prompt = buildPageInsightPrompt(page, audit);
+      let parsed: PageInsight | null = null;
+      try {
+        const response = await openai.responses.parse({
+          model: "gpt-4o-mini",
+          input: [
+            {
+              role: "system",
+              content:
+                "Du analyserar tillgänglighetsproblem för en enskild webbsida. Svara alltid på svenska och håll dig kortfattad men handlingsorienterad."
+            },
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          text: {
+            format: zodTextFormat(PAGE_INSIGHT_SCHEMA, "insight")
           }
-        ],
-        text: {
-          format: zodTextFormat(PAGE_INSIGHT_SCHEMA, "insight")
+        });
+        parsed = response.output_parsed ?? null;
+      } catch (error) {
+        console.warn(
+          "[analyze] page_insight_error",
+          JSON.stringify({
+            event: "analyze.page_insight_error",
+            runId: audit.id,
+            pageId: page.id,
+            message: error instanceof Error ? error.message : "unknown-error"
+          })
+        );
+      }
+
+      const normalized = parsed ? normalizePageInsight(parsed, page) : buildPageFallbackInsight(page);
+
+      const aiInsightsValue: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue = normalized
+        ? (normalized as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull;
+
+      await prisma.page.update({
+        where: { id: page.id },
+        data: {
+          aiInsights: aiInsightsValue
         }
       });
-      parsed = response.output_parsed ?? null;
-    } catch (error) {
-      console.warn(
-        "[analyze] page_insight_error",
-        JSON.stringify({
-          event: "analyze.page_insight_error",
-          runId: audit.id,
-          pageId: page.id,
-          message: error instanceof Error ? error.message : "unknown-error"
-        })
-      );
-    }
 
-    const normalized = parsed ? normalizePageInsight(parsed, page) : buildPageFallbackInsight(page);
-
-    const aiInsightsValue: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue = normalized
-      ? (normalized as unknown as Prisma.InputJsonValue)
-      : Prisma.DbNull;
-
-    await prisma.page.update({
-      where: { id: page.id },
-      data: {
-        aiInsights: aiInsightsValue
+      if (normalized) {
+        insights.push(normalized);
       }
-    });
-
-    if (normalized) {
-      insights.push(normalized);
     }
-  }
+  };
+
+  await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
 
   return insights;
 }
@@ -618,7 +642,7 @@ function buildRunSummaryPrompt({
     const issueCount = pageIssueCounts[insight.url] ?? 0;
     const limitedRecommendations = insight.recommendations.slice(0, 5);
     const limitedQuickWins = insight.quick_wins.slice(0, 5);
-    const limitedTopRules = insight.top_rules.slice(0, 5).map((rule) => ({
+    const limitedTopRules = insight.top_rules.slice(0, 3).map((rule) => ({
       ruleId: rule.rule_id,
       description: rule.description ?? null,
       wcagRefs: rule.wcag_refs,
@@ -647,7 +671,7 @@ function buildRunSummaryPrompt({
     pages: summarizedPages
   };
 
-  return `Audit run ${audit.id} för ${audit.rootUrl}. Varje sida har först analyserats separat och du får deras sammanfattningar nedan.\n\nUppgift:\n1. Läs igenom sidornas insikter.\n2. Skapa en övergripande tillgänglighetsrapport på svenska som sammanfattar helheten, grupperar återkommande problem och lyfter snabba vinster.\n3. Inkludera rekommendationer och nästa steg baserat på de aggregerade insikterna.\n\nUnderlag (JSON):\n${JSON.stringify(structuredData, null, 2)}`;
+  return `Audit run ${audit.id} för ${audit.rootUrl}. Varje sida har först analyserats separat och du får deras sammanfattningar nedan.\n\nUppgift:\n1. Läs igenom sidornas insikter.\n2. Skapa en övergripande tillgänglighetsrapport på svenska som sammanfattar helheten, grupperar återkommande problem och lyfter snabba vinster.\n3. Inkludera rekommendationer och nästa steg baserat på de aggregerade insikterna.\n\nUnderlag (JSON):\n${JSON.stringify(structuredData)}`;
 }
 
 function buildPageInsightPrompt(page: AuditWithRelations["pages"][number], audit: AuditWithRelations): string {

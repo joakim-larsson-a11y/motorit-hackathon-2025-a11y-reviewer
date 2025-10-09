@@ -26,6 +26,7 @@ export function AuditDashboardClient({ initialAudit }: Props) {
 
   const issueTotal = useMemo(() => audit.totalIssues, [audit.totalIssues]);
   const pageProgress = useMemo(() => computePageProgress(audit.pages), [audit.pages]);
+  const analysisProgress = useMemo(() => computeAnalysisProgress(audit.pages), [audit.pages]);
   const showProgressPanel = !FINAL_STATUSES.has(audit.status) && pageProgress.total > 0;
 
   const poll = useCallback(async () => {
@@ -120,7 +121,7 @@ export function AuditDashboardClient({ initialAudit }: Props) {
             value={issueTotal.toString()}
           />
         </dl>
-        {showProgressPanel ? <ProgressPanel progress={pageProgress} /> : null}
+        {showProgressPanel ? <ProgressPanel progress={pageProgress} analysis={analysisProgress} /> : null}
       </section>
 
       <SummarySection summary={audit.summary} />
@@ -131,40 +132,79 @@ export function AuditDashboardClient({ initialAudit }: Props) {
 }
 
 type PageProgress = ReturnType<typeof computePageProgress>;
+type AnalysisProgress = ReturnType<typeof computeAnalysisProgress>;
 
-function ProgressPanel({ progress }: { progress: PageProgress }) {
+function ProgressPanel({ progress, analysis }: { progress: PageProgress; analysis: AnalysisProgress }) {
   const completed = progress.completeWithIssues + progress.completeNoIssues;
   const completionRate = progress.total === 0 ? 0 : Math.round((completed / progress.total) * 100);
+  const analysisRate = analysis.total === 0 ? 0 : Math.round((analysis.completed / analysis.total) * 100);
+  const analysisPending = analysis.pending;
+  const analysisHeadline =
+    analysis.total > 0
+      ? `${analysis.completed} av ${analysis.total} sidor analyserade (${analysisRate}%)`
+      : analysis.skipped > 0
+        ? "Ingen AI-analys kunde köras eftersom vissa sidor misslyckades."
+        : "Väntar på att sidor ska analyseras.";
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm dark:border-slate-800 dark:bg-slate-900/30">
-      <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-            Framsteg
-          </p>
-          <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
-            {completed} av {progress.total} sidor klara ({completionRate}%)
-          </p>
-        </div>
-        <div className="flex w-full max-w-md items-center gap-3">
-          <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
-            <div
-              className="h-full rounded-full bg-emerald-500 transition-[width]"
-              style={{ width: `${Math.min(100, completionRate)}%` }}
-            />
+      <div className="space-y-4">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              Renderingsstatus
+            </p>
+            <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              {completed} av {progress.total} sidor klara ({completionRate}%)
+            </p>
           </div>
-          <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-            {completionRate}%
-          </span>
+          <div className="flex w-full max-w-md items-center gap-3">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+              <div
+                className="h-full rounded-full bg-emerald-500 transition-[width]"
+                style={{ width: `${Math.min(100, completionRate)}%` }}
+              />
+            </div>
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+              {completionRate}%
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
+              AI-analys
+            </p>
+            <p className="text-lg font-semibold text-slate-900 dark:text-slate-100">
+              {analysisHeadline}
+            </p>
+            {analysis.skipped > 0 ? (
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {analysis.skipped} {analysis.skipped === 1 ? "sida saknar" : "sidor saknar"} analys eftersom renderingen misslyckades.
+              </p>
+            ) : null}
+          </div>
+          <div className="flex w-full max-w-md items-center gap-3">
+            <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+              <div
+                className="h-full rounded-full bg-sky-500 transition-[width]"
+                style={{ width: `${Math.min(100, analysisRate)}%` }}
+              />
+            </div>
+            <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+              {analysisRate}%
+            </span>
+          </div>
         </div>
       </div>
-      <dl className="mt-4 grid gap-3 text-xs leading-5 text-slate-600 dark:text-slate-300 sm:grid-cols-2 lg:grid-cols-5">
+      <dl className="mt-4 grid gap-3 text-xs leading-5 text-slate-600 dark:text-slate-300 sm:grid-cols-2 lg:grid-cols-7">
         <ProgressBadge label="Köade" value={progress.queued} tone="purple" />
         <ProgressBadge label="Pågår" value={progress.inProgress} tone="blue" />
         <ProgressBadge label="Klart – problem" value={progress.completeWithIssues} tone="amber" />
         <ProgressBadge label="Klart – inga problem" value={progress.completeNoIssues} tone="emerald" />
         <ProgressBadge label="Misslyckade" value={progress.failed} tone="rose" />
+        <ProgressBadge label="Analys klar" value={analysis.completed} tone="emerald" />
+        <ProgressBadge label="Återstår analys" value={analysisPending} tone="blue" />
       </dl>
     </div>
   );
@@ -327,6 +367,32 @@ function computePageProgress(pages: SerializableAuditPage[]) {
       failed: 0,
     }
   );
+}
+
+function computeAnalysisProgress(pages: SerializableAuditPage[]) {
+  const base = pages.reduce(
+    (acc, page) => {
+      const status = page.status as PageStatus | string;
+      if (status === "FAILED") {
+        acc.skipped += 1;
+        return acc;
+      }
+
+      acc.total += 1;
+      if (page.hasAiInsights) {
+        acc.completed += 1;
+      }
+      return acc;
+    },
+    {
+      total: 0,
+      completed: 0,
+      skipped: 0,
+    }
+  );
+
+  const pending = Math.max(base.total - base.completed, 0);
+  return { ...base, pending };
 }
 
 function SummaryTile({ label, value }: { label: string; value: string }) {

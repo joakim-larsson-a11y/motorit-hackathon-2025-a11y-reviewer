@@ -51,6 +51,7 @@ export type SerializableAuditPage = {
   httpStatus: number | null;
   issueCount: number;
   updatedAt: string;
+  hasAiInsights: boolean;
 };
 
 export type SerializableAuditRun = {
@@ -91,6 +92,7 @@ const normalizePage = (page: SourcePage): SerializableAuditPage => ({
   httpStatus: typeof page.httpStatus === "number" ? page.httpStatus : null,
   issueCount: toIssueCount(page.issues),
   updatedAt: toIsoString(page.updatedAt ?? new Date()),
+  hasAiInsights: page.aiInsights != null,
 });
 
 const normalizeSummary = (summary?: SourceSummary | null) => {
