@@ -136,7 +136,7 @@ export function AuditDashboardClient({ initialAudit }: Props) {
           />
           <SummaryTile label="Sidor" value={audit.pages.length.toString()} />
           <SummaryTile
-            label="Total antal issues"
+            label="Totalt antal problem"
             value={issueTotal.toString()}
           />
         </dl>
@@ -403,7 +403,7 @@ function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: st
             Sidor
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Filtrera på titel/URL, status och antal issues.
+            Filtrera på titel/URL, status och antal problem.
           </p>
         </div>
       </div>
@@ -461,7 +461,7 @@ function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: st
                 Status
               </th>
               <th scope="col" className="py-3 pr-4">
-                # Issues
+                Antal problem
               </th>
               <th scope="col" className="py-3 pr-4">
                 Uppdaterad
