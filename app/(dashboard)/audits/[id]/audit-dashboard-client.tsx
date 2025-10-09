@@ -2,10 +2,14 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { ChangeEvent } from "react";
 
 import { StatusBadge } from "@/components/ui/status-badge";
 import type { AuditStatus, PageStatus } from "@prisma/client";
-import type { SerializableAuditRun, SerializableAuditPage } from "@/lib/serializers/audit";
+import type {
+  SerializableAuditRun,
+  SerializableAuditPage,
+} from "@/lib/serializers/audit";
 import { normalizeAudit } from "@/lib/serializers/audit";
 
 type Props = {
@@ -22,12 +26,21 @@ export function AuditDashboardClient({ initialAudit }: Props) {
   const [audit, setAudit] = useState<SerializableAuditRun>(initialAudit);
   const [isPolling, setIsPolling] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState(() => new Date(initialAudit.updatedAt));
+  const [lastUpdated, setLastUpdated] = useState(
+    () => new Date(initialAudit.updatedAt)
+  );
 
   const issueTotal = useMemo(() => audit.totalIssues, [audit.totalIssues]);
-  const pageProgress = useMemo(() => computePageProgress(audit.pages), [audit.pages]);
-  const analysisProgress = useMemo(() => computeAnalysisProgress(audit.pages), [audit.pages]);
-  const showProgressPanel = !FINAL_STATUSES.has(audit.status) && pageProgress.total > 0;
+  const pageProgress = useMemo(
+    () => computePageProgress(audit.pages),
+    [audit.pages]
+  );
+  const analysisProgress = useMemo(
+    () => computeAnalysisProgress(audit.pages),
+    [audit.pages]
+  );
+  const showProgressPanel =
+    !FINAL_STATUSES.has(audit.status) && pageProgress.total > 0;
 
   const poll = useCallback(async () => {
     try {
@@ -43,11 +56,17 @@ export function AuditDashboardClient({ initialAudit }: Props) {
 
       const payload = await response.json();
       const normalized = normalizeAudit(payload);
-      setAudit((current) => (JSON.stringify(current) === JSON.stringify(normalized) ? current : normalized));
+      setAudit((current) =>
+        JSON.stringify(current) === JSON.stringify(normalized)
+          ? current
+          : normalized
+      );
       setLastUpdated(new Date());
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Okänt fel vid uppdatering.");
+      setError(
+        err instanceof Error ? err.message : "Okänt fel vid uppdatering."
+      );
     }
   }, [audit.id]);
 
@@ -121,7 +140,9 @@ export function AuditDashboardClient({ initialAudit }: Props) {
             value={issueTotal.toString()}
           />
         </dl>
-        {showProgressPanel ? <ProgressPanel progress={pageProgress} analysis={analysisProgress} /> : null}
+        {showProgressPanel ? (
+          <ProgressPanel progress={pageProgress} analysis={analysisProgress} />
+        ) : null}
       </section>
 
       <SummarySection summary={audit.summary} />
@@ -134,17 +155,27 @@ export function AuditDashboardClient({ initialAudit }: Props) {
 type PageProgress = ReturnType<typeof computePageProgress>;
 type AnalysisProgress = ReturnType<typeof computeAnalysisProgress>;
 
-function ProgressPanel({ progress, analysis }: { progress: PageProgress; analysis: AnalysisProgress }) {
+function ProgressPanel({
+  progress,
+  analysis,
+}: {
+  progress: PageProgress;
+  analysis: AnalysisProgress;
+}) {
   const completed = progress.completeWithIssues + progress.completeNoIssues;
-  const completionRate = progress.total === 0 ? 0 : Math.round((completed / progress.total) * 100);
-  const analysisRate = analysis.total === 0 ? 0 : Math.round((analysis.completed / analysis.total) * 100);
+  const completionRate =
+    progress.total === 0 ? 0 : Math.round((completed / progress.total) * 100);
+  const analysisRate =
+    analysis.total === 0
+      ? 0
+      : Math.round((analysis.completed / analysis.total) * 100);
   const analysisPending = analysis.pending;
   const analysisHeadline =
     analysis.total > 0
       ? `${analysis.completed} av ${analysis.total} sidor analyserade (${analysisRate}%)`
       : analysis.skipped > 0
-        ? "Ingen AI-analys kunde köras eftersom vissa sidor misslyckades."
-        : "Väntar på att sidor ska analyseras.";
+      ? "Ingen AI-analys kunde köras eftersom vissa sidor misslyckades."
+      : "Väntar på att sidor ska analyseras.";
 
   return (
     <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-4 text-sm dark:border-slate-800 dark:bg-slate-900/30">
@@ -180,7 +211,9 @@ function ProgressPanel({ progress, analysis }: { progress: PageProgress; analysi
             </p>
             {analysis.skipped > 0 ? (
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                {analysis.skipped} {analysis.skipped === 1 ? "sida saknar" : "sidor saknar"} analys eftersom renderingen misslyckades.
+                {analysis.skipped}{" "}
+                {analysis.skipped === 1 ? "sida saknar" : "sidor saknar"} analys
+                eftersom renderingen misslyckades.
               </p>
             ) : null}
           </div>
@@ -200,11 +233,31 @@ function ProgressPanel({ progress, analysis }: { progress: PageProgress; analysi
       <dl className="mt-4 grid gap-3 text-xs leading-5 text-slate-600 dark:text-slate-300 sm:grid-cols-2 lg:grid-cols-7">
         <ProgressBadge label="Köade" value={progress.queued} tone="purple" />
         <ProgressBadge label="Pågår" value={progress.inProgress} tone="blue" />
-        <ProgressBadge label="Klart – problem" value={progress.completeWithIssues} tone="amber" />
-        <ProgressBadge label="Klart – inga problem" value={progress.completeNoIssues} tone="emerald" />
-        <ProgressBadge label="Misslyckade" value={progress.failed} tone="rose" />
-        <ProgressBadge label="Analys klar" value={analysis.completed} tone="emerald" />
-        <ProgressBadge label="Återstår analys" value={analysisPending} tone="blue" />
+        <ProgressBadge
+          label="Klart – problem"
+          value={progress.completeWithIssues}
+          tone="amber"
+        />
+        <ProgressBadge
+          label="Klart – inga problem"
+          value={progress.completeNoIssues}
+          tone="emerald"
+        />
+        <ProgressBadge
+          label="Misslyckade"
+          value={progress.failed}
+          tone="rose"
+        />
+        <ProgressBadge
+          label="Analys klar"
+          value={analysis.completed}
+          tone="emerald"
+        />
+        <ProgressBadge
+          label="Återstår analys"
+          value={analysisPending}
+          tone="blue"
+        />
       </dl>
     </div>
   );
@@ -219,11 +272,17 @@ function ProgressBadge({
   value: number;
   tone: "purple" | "blue" | "amber" | "emerald" | "rose";
 }) {
-  const toneClasses: Record<"purple" | "blue" | "amber" | "emerald" | "rose", string> = {
-    purple: "bg-purple-500/10 text-purple-700 dark:bg-purple-500/15 dark:text-purple-200",
+  const toneClasses: Record<
+    "purple" | "blue" | "amber" | "emerald" | "rose",
+    string
+  > = {
+    purple:
+      "bg-purple-500/10 text-purple-700 dark:bg-purple-500/15 dark:text-purple-200",
     blue: "bg-blue-500/10 text-blue-700 dark:bg-blue-500/15 dark:text-blue-200",
-    amber: "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
-    emerald: "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200",
+    amber:
+      "bg-amber-500/10 text-amber-700 dark:bg-amber-500/15 dark:text-amber-200",
+    emerald:
+      "bg-emerald-500/10 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-200",
     rose: "bg-rose-500/10 text-rose-700 dark:bg-rose-500/15 dark:text-rose-200",
   };
 
@@ -232,14 +291,20 @@ function ProgressBadge({
       <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400">
         {label}
       </span>
-      <span className={`inline-flex min-w-[2.5rem] justify-center rounded-full px-2 py-1 text-sm font-semibold ${toneClasses[tone]}`}>
+      <span
+        className={`inline-flex min-w-[2.5rem] justify-center rounded-full px-2 py-1 text-sm font-semibold ${toneClasses[tone]}`}
+      >
         {value}
       </span>
     </div>
   );
 }
 
-function SummarySection({ summary }: { summary: SerializableAuditRun["summary"] }) {
+function SummarySection({
+  summary,
+}: {
+  summary: SerializableAuditRun["summary"];
+}) {
   if (!summary) {
     return (
       <section className="rounded-2xl border border-dashed border-slate-200 bg-white/70 p-6 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900/40 dark:text-slate-400">
@@ -249,82 +314,205 @@ function SummarySection({ summary }: { summary: SerializableAuditRun["summary"] 
   }
 
   const quickWins = Array.isArray((summary.payload as any)?.quick_wins)
-    ? ((summary.payload as any).quick_wins as Array<{ title: string; description: string }>)
+    ? ((summary.payload as any).quick_wins as Array<{
+        title: string;
+        description: string;
+      }>)
     : [];
 
   return (
     <section className="grid gap-6 lg:grid-cols-[2fr,1fr]">
       <article className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Översikt</h2>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+          Översikt
+        </h2>
         <p className="whitespace-pre-line text-sm leading-relaxed text-slate-700 dark:text-slate-300">
           {summary.text}
         </p>
       </article>
       <article className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Snabba vinster</h2>
+        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+          Snabba vinster
+        </h2>
         {quickWins.length > 0 ? (
           <ul className="space-y-3 text-sm text-slate-700 dark:text-slate-300">
             {quickWins.map((win, index) => (
               <li key={`${win.title}-${index}`}>
-                <p className="font-semibold text-slate-900 dark:text-slate-100">{win.title}</p>
-                <p className="text-slate-600 dark:text-slate-400">{win.description}</p>
+                <p className="font-semibold text-slate-900 dark:text-slate-100">
+                  {win.title}
+                </p>
+                <p className="text-slate-600 dark:text-slate-400">
+                  {win.description}
+                </p>
               </li>
             ))}
           </ul>
         ) : (
-          <p className="text-sm text-slate-600 dark:text-slate-400">Inga snabba vinster identifierades.</p>
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Inga snabba vinster identifierades.
+          </p>
         )}
       </article>
     </section>
   );
 }
 
+type StatusFilter = "all" | "withIssues" | "withoutIssues";
+
 function PageTable({ pages, runId }: { pages: SerializableAuditPage[]; runId: string }) {
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+
+  const filteredPages = useMemo(() => {
+    const normalizedSearch = search.trim().toLowerCase();
+    return pages.filter((page) => {
+      if (normalizedSearch) {
+        const title = deriveTitleFromUrl(page.url).toLowerCase();
+        const matches =
+          title.includes(normalizedSearch) ||
+          page.url.toLowerCase().includes(normalizedSearch);
+        if (!matches) {
+          return false;
+        }
+      }
+
+      if (
+        (statusFilter === "withIssues" &&
+          page.status !== "COMPLETE_WITH_ISSUES") ||
+        (statusFilter === "withoutIssues" &&
+          page.status !== "COMPLETE_NO_ISSUES")
+      ) {
+        return false;
+      }
+
+      return true;
+    });
+  }, [pages, search, statusFilter]);
+
+  const handleStatusChange = (event: ChangeEvent<HTMLSelectElement>) => {
+    setStatusFilter(event.target.value as StatusFilter);
+  };
+
+
+
   return (
     <section className="space-y-4 rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900/40">
-      <div className="flex items-center justify-between gap-4">
-        <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">Sidor</h2>
-        <p className="text-xs text-slate-500 dark:text-slate-400">
-          Visa status, antal issues och snabb åtkomst till artefakter.
-        </p>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+            Sidor
+          </h2>
+          <p className="text-xs text-slate-500 dark:text-slate-400">
+            Filtrera på titel/URL, status och antal issues.
+          </p>
+        </div>
       </div>
+      <form
+        aria-label="Filtrera sidor"
+        className="grid w-full gap-4 sm:grid-cols-2 lg:grid-cols-3"
+        onSubmit={(event) => {
+          event.preventDefault();
+        }}
+      >
+        <div className="flex flex-col gap-1 sm:col-span-2">
+          <label
+            htmlFor="page-search"
+            className="text-xs font-medium text-slate-600 dark:text-slate-300"
+          >
+            Sök (titel eller URL)
+          </label>
+          <input
+            id="page-search"
+            type="search"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="ex. kontakt"
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/40 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label
+            htmlFor="status-filter"
+            className="text-xs font-medium text-slate-600 dark:text-slate-300"
+          >
+            Status
+          </label>
+          <select
+            id="status-filter"
+            value={statusFilter}
+            onChange={handleStatusChange}
+            className="w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-brand focus:ring-2 focus:ring-brand/40 dark:border-slate-700 dark:bg-slate-950/60 dark:text-slate-100"
+          >
+            <option value="all">Alla</option>
+            <option value="withIssues">Med problem</option>
+            <option value="withoutIssues">Utan problem</option>
+          </select>
+        </div>
+      </form>
+
       <div className="overflow-x-auto">
         <table className="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
           <thead>
             <tr className="text-left text-xs uppercase tracking-wide text-slate-500 dark:text-slate-400">
-              <th scope="col" className="py-3 pr-4">Titel</th>
-              <th scope="col" className="py-3 pr-4">Status</th>
-              <th scope="col" className="py-3 pr-4"># Issues</th>
-              <th scope="col" className="py-3 pr-4">Uppdaterad</th>
+              <th scope="col" className="py-3 pr-4">
+                Titel
+              </th>
+              <th scope="col" className="py-3 pr-4">
+                Status
+              </th>
+              <th scope="col" className="py-3 pr-4">
+                # Issues
+              </th>
+              <th scope="col" className="py-3 pr-4">
+                Uppdaterad
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200 dark:divide-slate-800">
-            {pages.map((page) => (
-              <tr key={page.id} className="align-top text-slate-700 dark:text-slate-300">
-                <td className="py-3 pr-4">
-                  <div className="flex flex-col gap-1">
-                    <Link
-                      href={`/audits/${runId}/pages/${page.id}`}
-                      className="font-medium text-slate-900 underline decoration-dotted underline-offset-4 transition hover:text-brand dark:text-slate-100"
-                    >
-                      {deriveTitleFromUrl(page.url)}
-                    </Link>
-                    <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
-                      <span className="break-all">{page.url}</span>
-                      {page.httpStatus ? <span>HTTP {page.httpStatus}</span> : null}
-                      {typeof page.loadTimeMs === "number" ? <span>{page.loadTimeMs} ms</span> : null}
-                    </div>
-                  </div>
-                </td>
-                <td className="py-3 pr-4">
-                  <StatusBadge status={page.status as PageStatus} />
-                </td>
-                <td className="py-3 pr-4">{page.issueCount}</td>
-                <td className="py-3 pr-4 text-xs text-slate-500 dark:text-slate-400">
-                  {formatTimestamp(page.updatedAt)}
+            {filteredPages.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={4}
+                  className="py-6 text-center text-sm text-slate-500 dark:text-slate-400"
+                >
+                  Inga sidor matchar dina filter just nu.
                 </td>
               </tr>
-            ))}
+            ) : (
+              filteredPages.map((page) => (
+                <tr
+                  key={page.id}
+                  className="align-top text-slate-700 dark:text-slate-300"
+                >
+                  <td className="py-3 pr-4">
+                    <div className="flex flex-col gap-1">
+                      <Link
+                        href={`/audits/${runId}/pages/${page.id}`}
+                        className="font-medium text-slate-900 underline decoration-dotted underline-offset-4 transition hover:text-brand dark:text-slate-100"
+                      >
+                        {deriveTitleFromUrl(page.url)}
+                      </Link>
+                      <div className="flex flex-wrap gap-2 text-xs text-slate-500 dark:text-slate-400">
+                        <span className="break-all">{page.url}</span>
+                        {page.httpStatus ? (
+                          <span>HTTP {page.httpStatus}</span>
+                        ) : null}
+                        {typeof page.loadTimeMs === "number" ? (
+                          <span>{page.loadTimeMs} ms</span>
+                        ) : null}
+                      </div>
+                    </div>
+                  </td>
+                  <td className="py-3 pr-4">
+                    <StatusBadge status={page.status as PageStatus} />
+                  </td>
+                  <td className="py-3 pr-4">{page.issueCount}</td>
+                  <td className="py-3 pr-4 text-xs text-slate-500 dark:text-slate-400">
+                    {formatTimestamp(page.updatedAt)}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>

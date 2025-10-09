@@ -387,13 +387,13 @@ export async function handleAnalyze({ runId }: AnalyzeJobData) {
 
     for (const page of renderedPages) {
       const insight = pageInsightsByUrl.get(page.url) ?? null;
-        const aiInsightsValue: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue = insight
-          ? (insight as unknown as Prisma.InputJsonValue)
-          : Prisma.DbNull;
-        await tx.page.update({
-          where: { id: page.id },
-          data: {
-            aiInsights: aiInsightsValue,
+      const aiInsightsValue: Prisma.NullableJsonNullValueInput | Prisma.InputJsonValue = insight
+        ? (insight as unknown as Prisma.InputJsonValue)
+        : Prisma.DbNull;
+      await tx.page.update({
+        where: { id: page.id },
+        data: {
+          aiInsights: aiInsightsValue,
         },
       });
     }
